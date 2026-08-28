@@ -7,7 +7,7 @@ import { Ledger } from "@engine/ledger";
 import { scanSource } from "@engine/scanner";
 
 const dirs: string[] = [];
-afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
 function setup() {
   const dir = mkdtempSync(path.join(tmpdir(), "matpylon-scan-"));

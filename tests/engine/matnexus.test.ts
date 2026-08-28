@@ -44,7 +44,7 @@ beforeAll(async () => {
 afterAll(() => server.close());
 
 const dirs: string[] = [];
-afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
 function client(token: string | null = "mnx_pat_x", connectorId: string | null = "c-1") {
   return new MatNexusClient({ baseUrl, secrets: memorySecrets(token), connectorId, timeoutMs: 2000 });

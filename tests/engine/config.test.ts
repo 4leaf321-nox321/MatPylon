@@ -10,7 +10,7 @@ const tmp = () => {
   dirs.push(d);
   return d;
 };
-afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
 describe("config", () => {
   it("기본값: 1시간 간격, 5분 스캔, 소스 없음", () => {

@@ -11,7 +11,7 @@ import { scanSource } from "@engine/scanner";
 import type { DeliveryResult, Transport } from "@engine/transport";
 
 const dirs: string[] = [];
-afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 const T0 = 1_700_000_000_000;
 const MIN = 60_000;
 const DAY = 86_400_000;
