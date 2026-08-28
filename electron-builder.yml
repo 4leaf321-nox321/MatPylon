@@ -1,0 +1,22 @@
+# 설치파일 하나로 끝난다 — Python·런타임 등 추가 설치 없음(개발계획 §7).
+appId: kr.matnexus.matpylon
+productName: MatPylon
+directories:
+  output: release
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+asarUnpack:
+  - "**/*.node"
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  # 사용자 권한 설치. 관리자 권한을 요구하지 않는다(개발계획 결정 B).
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  language: "1042"
+  runAfterFinish: true
