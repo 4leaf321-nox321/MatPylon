@@ -7,6 +7,11 @@ on:
     tags: ["v*"]
   pull_request:
 
+# 릴리스를 만들려면 쓰기 권한이 필요하다. 기본 토큰은 읽기 전용이라
+# "Resource not accessible by integration" 으로 막혔다(v0.1.0 첫 시도).
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
