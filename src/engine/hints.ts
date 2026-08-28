@@ -2,7 +2,7 @@
  *
  * 규칙에 맞지 않는 파일은 막지 않는다 — 힌트 없이 간다. 서버 수집함이 받는다. */
 
-import { HINT_KEYS, type HintKey } from "./config";
+import { HINT_KEYS, type HintKey } from "@shared/hint-keys";
 
 export type Hints = Partial<Record<HintKey, string>>;
 

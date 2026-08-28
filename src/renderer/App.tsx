@@ -1,61 +1,81 @@
 import { useEffect, useState } from "react";
-import type { EngineStatus } from "@shared/ipc";
+import { AboutPage } from "./pages/AboutPage";
+import { Dashboard } from "./pages/Dashboard";
+import { HistoryPage } from "./pages/HistoryPage";
+import { LogPage } from "./pages/LogPage";
+import { SchedulePage } from "./pages/SchedulePage";
+import { ServerPage } from "./pages/ServerPage";
+import { SourcesPage } from "./pages/SourcesPage";
+import { Wizard } from "./pages/Wizard";
+import { useStatus } from "./hooks";
 
-/** P0: 엔진 상태가 보이고 자동 시작을 켜고 끌 수 있으면 된다. 화면 7개는 P3. */
+const TABS = [
+  ["dashboard", "대시보드", Dashboard],
+  ["server", "서버", ServerPage],
+  ["sources", "소스", SourcesPage],
+  ["schedule", "스케줄", SchedulePage],
+  ["history", "이력", HistoryPage],
+  ["log", "로그", LogPage],
+  ["about", "정보", AboutPage],
+] as const;
+
+type Tab = (typeof TABS)[number][0];
+
+const WIZARD_KEY = "matpylon.wizardDone";
+
 export function App() {
-  const [status, setStatus] = useState<EngineStatus | null>(null);
-  const [autoLaunch, setAutoLaunch] = useState<boolean | null>(null);
+  const status = useStatus();
+  const [tab, setTab] = useState<Tab>("dashboard");
+  const [wizard, setWizard] = useState<boolean | null>(null);
 
   useEffect(() => {
-    void window.matpylon.getStatus().then(setStatus);
-    void window.matpylon.getAutoLaunch().then(setAutoLaunch);
-    return window.matpylon.onStatus(setStatus);
-  }, []);
+    // 마법사는 한 번만. 서버가 설정돼 있으면 이전 설치의 설정이 남은 것이므로 건너뛴다.
+    if (status === null) return;
+    setWizard(!status.serverConfigured && localStorage.getItem(WIZARD_KEY) !== "1");
+  }, [status === null]);
 
-  const toggleAutoLaunch = async () => {
-    const next = !autoLaunch;
-    await window.matpylon.setAutoLaunch(next);
-    setAutoLaunch(next);
-  };
+  if (wizard === null) return null;
+  if (wizard)
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+        <Wizard
+          onDone={() => {
+            localStorage.setItem(WIZARD_KEY, "1");
+            setWizard(false);
+          }}
+        />
+      </div>
+    );
 
+  const Page = TABS.find(([k]) => k === tab)![2];
   return (
-    <div className="min-h-screen bg-slate-50 p-8 text-slate-900">
-      <h1 className="text-2xl font-semibold">MatPylon</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        장비 파일을 MatNexus 에 배달합니다. 창을 닫아도 트레이에서 계속 돕니다.
-      </p>
-
-      <section className="mt-6 rounded-lg border bg-white p-4">
-        <h2 className="font-medium">상태</h2>
-        {status ? (
-          <dl className="mt-2 grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
-            <dt className="text-slate-500">버전</dt>
-            <dd>{status.appVersion}</dd>
-            <dt className="text-slate-500">엔진</dt>
-            <dd>{status.running ? "동작 중" : "일시 정지"}</dd>
-            <dt className="text-slate-500">서버</dt>
-            <dd>{status.serverConfigured ? "설정됨" : "아직 설정되지 않음"}</dd>
-            <dt className="text-slate-500">대기 / 보냄 / 실패</dt>
-            <dd>
-              {status.counts.ready} / {status.counts.sent} / {status.counts.failed}
-            </dd>
-          </dl>
-        ) : (
-          <p className="mt-2 text-sm text-slate-400">불러오는 중…</p>
-        )}
-      </section>
-
-      <section className="mt-4 rounded-lg border bg-white p-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={autoLaunch ?? false}
-            disabled={autoLaunch === null}
-            onChange={toggleAutoLaunch}
-          />
-          Windows 로그인 시 자동 시작
-        </label>
-      </section>
+    <div className="flex min-h-screen bg-slate-50 text-slate-900">
+      <nav className="w-44 shrink-0 border-r border-slate-200 bg-white p-3">
+        <div className="mb-4 px-2">
+          <div className="font-semibold">MatPylon</div>
+          <div className="text-xs text-slate-400">{status?.appVersion}</div>
+        </div>
+        <ul className="space-y-0.5">
+          {TABS.map(([key, label]) => (
+            <li key={key}>
+              <button
+                onClick={() => setTab(key)}
+                className={`w-full rounded-md px-2 py-1.5 text-left text-sm ${
+                  tab === key ? "bg-blue-50 font-medium text-blue-700" : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {label}
+                {key === "history" && status?.counts.failed ? (
+                  <span className="ml-1 rounded bg-red-100 px-1 text-xs text-red-700">{status.counts.failed}</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <main className="flex-1 overflow-auto p-6">
+        <Page />
+      </main>
     </div>
   );
 }

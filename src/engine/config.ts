@@ -8,17 +8,6 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "
 import path from "node:path";
 import { z } from "zod";
 
-export const HINT_KEYS = [
-  "material_code",
-  "lot",
-  "specimen",
-  "orientation",
-  "tested_at",
-  "operator",
-  "instrument",
-] as const;
-export type HintKey = (typeof HINT_KEYS)[number];
-
 export const SourceSchema = z.object({
   /** 서버 `source_key`. 한 번 정하면 바꾸지 않는다 — 원장과 서버가 이 키로 잇는다. */
   key: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,39}$/, "소문자·숫자·_·- 로 2~40자"),

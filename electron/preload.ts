@@ -21,6 +21,12 @@ const api: MatPylonApi = {
   requeue: (id) => ipcRenderer.invoke(CHANNELS.requeue, id),
   pickFolder: () => ipcRenderer.invoke(CHANNELS.pickFolder),
   listFilenames: (dir, limit) => ipcRenderer.invoke(CHANNELS.listFilenames, dir, limit),
+  logTail: (lines) => ipcRenderer.invoke(CHANNELS.logTail, lines),
+  openLogFolder: () => ipcRenderer.invoke(CHANNELS.openLogFolder),
+  openDataFolder: () => ipcRenderer.invoke(CHANNELS.openDataFolder),
+  exportConfig: () => ipcRenderer.invoke(CHANNELS.exportConfig),
+  importConfig: () => ipcRenderer.invoke(CHANNELS.importConfig),
+  paths: () => ipcRenderer.invoke(CHANNELS.paths),
   getAutoLaunch: () => ipcRenderer.invoke(CHANNELS.getAutoLaunch),
   setAutoLaunch: (enabled) => ipcRenderer.invoke(CHANNELS.setAutoLaunch, enabled),
 };

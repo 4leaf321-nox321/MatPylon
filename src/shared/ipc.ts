@@ -53,6 +53,14 @@ export interface MatPylonApi {
   pickFolder(): Promise<string | null>;
   /** 파일명 규칙 미리보기용 — 폴더의 파일 이름 최대 n개. */
   listFilenames(dir: string, limit: number): Promise<string[]>;
+  /** 오늘 로그의 마지막 n줄. */
+  logTail(lines: number): Promise<string>;
+  openLogFolder(): Promise<void>;
+  openDataFolder(): Promise<void>;
+  /** 설정을 파일로 — 장비 PC 여러 대에 복제한다. 토큰은 안 들어간다. */
+  exportConfig(): Promise<boolean>;
+  importConfig(): Promise<boolean>;
+  paths(): Promise<{ dataDir: string; configFile: string; logFile: string }>;
   /** 로그인 시 자동 시작. 레지스트리 Run 키 — 관리자 권한 불필요. */
   getAutoLaunch(): Promise<boolean>;
   setAutoLaunch(enabled: boolean): Promise<void>;
@@ -74,6 +82,12 @@ export const CHANNELS = {
   requeue: "engine:requeue",
   pickFolder: "app:pickFolder",
   listFilenames: "app:listFilenames",
+  logTail: "app:logTail",
+  openLogFolder: "app:openLogFolder",
+  openDataFolder: "app:openDataFolder",
+  exportConfig: "app:exportConfig",
+  importConfig: "app:importConfig",
+  paths: "app:paths",
   getAutoLaunch: "app:getAutoLaunch",
   setAutoLaunch: "app:setAutoLaunch",
 } as const;

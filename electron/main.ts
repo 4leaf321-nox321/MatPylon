@@ -1,10 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import log from "electron-log/main";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Engine } from "@engine/index";
-import { parseConfig } from "@engine/config";
+import { configPath, parseConfig } from "@engine/config";
 import { CHANNELS } from "@shared/ipc";
 import { fileSecrets } from "./secrets";
 
@@ -48,6 +48,19 @@ function createWindow(): BrowserWindow {
     }
   });
   w.once("ready-to-show", () => w.show());
+  // 개발용: `--screenshot=경로` 로 띄우면 화면을 찍고 종료한다. 바탕화면을 찍지 않고
+  // 창 자체를 찍으므로 다른 창에 가려도 된다.
+  const shot = process.argv.find((a) => a.startsWith("--screenshot="))?.slice("--screenshot=".length);
+  if (shot) {
+    w.webContents.once("did-finish-load", () => {
+      setTimeout(async () => {
+        const img = await w.webContents.capturePage();
+        require("node:fs").writeFileSync(shot, img.toPNG());
+        quitting = true;
+        app.quit();
+      }, 1500);
+    });
+  }
   return w;
 }
 
@@ -149,6 +162,46 @@ app.whenReady().then(() => {
     } catch {
       return [];
     }
+  });
+  const logFile = () => log.transports.file.getFile().path;
+  ipcMain.handle(CHANNELS.logTail, (_e, lines: number) => {
+    try {
+      return readFileSync(logFile(), "utf8").split(/\r?\n/).slice(-lines).join("\n");
+    } catch {
+      return "";
+    }
+  });
+  ipcMain.handle(CHANNELS.openLogFolder, () => shell.showItemInFolder(logFile()));
+  ipcMain.handle(CHANNELS.openDataFolder, () => shell.openPath(app.getPath("userData")));
+  ipcMain.handle(CHANNELS.paths, () => ({
+    dataDir: app.getPath("userData"),
+    configFile: configPath(app.getPath("userData")),
+    logFile: logFile(),
+  }));
+  ipcMain.handle(CHANNELS.exportConfig, async () => {
+    const r = await dialog.showSaveDialog({
+      defaultPath: `matpylon-${os.hostname()}.json`,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (r.canceled || !r.filePath) return false;
+    // 커넥터 id 는 이 PC 의 것이다 — 복제본에는 넣지 않는다.
+    const c = engine.getConfig();
+    const out = { ...c, server: { ...c.server, connectorId: null, connectorName: "" } };
+    writeFileSync(r.filePath, JSON.stringify(out, null, 2), "utf8");
+    return true;
+  });
+  ipcMain.handle(CHANNELS.importConfig, async () => {
+    const r = await dialog.showOpenDialog({
+      properties: ["openFile"],
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    const file = r.filePaths[0];
+    if (r.canceled || !file) return false;
+    const incoming = parseConfig(JSON.parse(readFileSync(file, "utf8")));
+    // 서버 URL·소스·스케줄은 가져오고, 커넥터 id 는 이 PC 것을 지킨다.
+    const mine = engine.getConfig();
+    engine.setConfig({ ...incoming, server: { ...incoming.server, connectorId: mine.server.connectorId, connectorName: mine.server.connectorName } });
+    return true;
   });
   ipcMain.handle(CHANNELS.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin);
   ipcMain.handle(CHANNELS.setAutoLaunch, (_e, enabled: boolean) => {

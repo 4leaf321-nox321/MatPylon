@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -12,7 +16,23 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["src/renderer/*"], "@shared/*": ["src/shared/*"] }
+    "paths": {
+      "@/*": [
+        "src/renderer/*"
+      ],
+      "@shared/*": [
+        "src/shared/*"
+      ],
+      "@engine/*": [
+        "src/engine/*"
+      ]
+    },
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/renderer", "src/shared"]
+  "include": [
+    "src/renderer",
+    "src/shared"
+  ]
 }
