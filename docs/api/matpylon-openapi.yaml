@@ -209,6 +209,59 @@ paths:
                   limit: { type: integer }
                   offset: { type: integer }
 
+  /pipelines/resolve:
+    post:
+      summary: 힌트 → 시편 후보 (규칙 편집기의 「MatNexus 대조」)
+      description: |
+        MatPylon 소스 편집기가 파일명 규칙으로 뽑은 힌트를 보내 "붙나 / 왜 안 붙나" 를 받는다.
+        **워커의 후보 함수를 그대로 부른다** — 매칭 규칙은 한 군데에만 있다.
+        파일 없이 힌트만 보므로 프로파일 `identity` 는 못 본다(그건 반입 뒤 워커가 한다).
+        아무것도 만들지 않는다. 요청서: MatNexus-작업요청-2.md
+      tags: [inbox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspace_id: { type: string, format: uuid }
+                hints:
+                  type: array
+                  maxItems: 50
+                  items: { $ref: "#/components/schemas/Hints" }
+              required: [workspace_id, hints]
+      responses:
+        "200":
+          description: 요청과 같은 순서·개수
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/ResolveResult" }
+                required: [results]
+        "403": { $ref: "#/components/responses/Error" }
+
+  /pipelines/reference:
+    get:
+      summary: 재료 → 시료 → 시편 이름 트리 (규칙 편집기의 참조 패널)
+      description: |
+        이름만. 화면이 참조로 볼 뿐 편집하지 않는다. `aliases` 는 워커가 `material_code` 를
+        맞출 때 보는 집합(이름·grade·별칭)과 같다. 삭제된 것은 뺀다.
+      tags: [inbox]
+      parameters:
+        - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 트리
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReferenceTree" }
+        "403": { $ref: "#/components/responses/Error" }
+
   /pipelines/inbox/{item_id}:
     get:
       summary: 수집함 항목 상세
@@ -396,6 +449,63 @@ components:
         operator: { type: string }
         instrument: { type: string }
       additionalProperties: false
+
+    ResolveResult:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum: [unique, multiple, none]
+          description: unique=자동 등록됨 · multiple=후보 여럿(수집함행) · none=0건
+        candidate: { $ref: "#/components/schemas/Candidate" }
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/Candidate" }
+        reason: { type: string, description: "none 일 때 왜. 워커가 error 에 적는 문구와 같다" }
+      required: [outcome]
+
+    Candidate:
+      type: object
+      properties:
+        specimen_id: { type: string, format: uuid }
+        specimen_name: { type: string }
+        material_name: { type: string }
+        sample_name: { type: string }
+        reason: { type: string, description: "어느 힌트로 맞았나" }
+      required: [specimen_id, specimen_name, material_name, sample_name, reason]
+
+    ReferenceTree:
+      type: object
+      properties:
+        generated_at: { type: string, format: date-time }
+        materials:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              grade: { type: [string, "null"] }
+              aliases: { type: array, items: { type: string } }
+              samples:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    lot: { type: string }
+                    specimens:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id: { type: string, format: uuid }
+                          name: { type: string }
+                          orientation: { type: [string, "null"] }
+                        required: [id, name]
+                  required: [id, lot, specimens]
+            required: [id, name, aliases, samples]
+      required: [materials, generated_at]
 
     InboxStatus:
       type: string
