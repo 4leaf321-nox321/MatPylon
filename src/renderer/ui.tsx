@@ -18,7 +18,7 @@ export function Button({
     <button
       {...props}
       className={cx(
-        "rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50",
+        "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50",
         styles,
         className,
       )}
@@ -31,7 +31,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
     <input
       {...props}
       className={cx(
-        "w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100",
+        "w-full min-w-0 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100",
         className,
       )}
     />

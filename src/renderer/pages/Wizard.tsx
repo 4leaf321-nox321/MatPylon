@@ -28,7 +28,7 @@ export function Wizard({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl flex-col gap-4">
       <Card>
         <h1 className="text-xl font-semibold">MatPylon 처음 설정</h1>
         <p className="mt-1 text-sm text-slate-600">
