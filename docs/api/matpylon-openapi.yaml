@@ -1,0 +1,446 @@
+openapi: 3.1.0
+info:
+  title: MatNexus pipelines API — MatPylon 이 부르는 계약
+  version: 1.0.0
+  description: |
+    MatPylon(장비 PC 수집 에이전트)이 MatNexus 에 부르는 엔드포인트 전부다.
+    **이 문서가 두 프로젝트 사이의 계약**이다(개발계획 §5, §8 P4).
+    MatNexus 는 이 모양으로 `app/modules/pipelines` 를 만들고,
+    `scripts/export_openapi.py` 결과가 여기와 맞는지 CI 에서 대조한다.
+
+    규약은 MatNexus 의 것을 그대로 따른다.
+    - 성공 응답은 리소스 그대로, 오류만 엔벨로프 (ADR 0001)
+    - 인증은 PAT Bearer (ADR 0002). 사람 세션 토큰도 같은 자리에서 통한다
+    - 오류 코드 `MNX-PIPE-NNNN`
+    - 부분 실패는 건별로: 파일 1 = 요청 1
+
+servers:
+  - url: /api
+
+security:
+  - bearer: []
+
+tags:
+  - name: connectors
+    description: 장비 PC 등록과 상태 보고
+  - name: inbox
+    description: 파일 반입과 수집함
+
+paths:
+  /auth/me:
+    get:
+      summary: 토큰 확인 (기존 엔드포인트 — 변경 없음)
+      description: MatPylon 「연결 확인」이 부른다. 기존 `auth` 모듈 그대로.
+      tags: [connectors]
+      responses:
+        "200":
+          description: 토큰의 주인
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  display_name: { type: string }
+                  email: { type: string }
+                required: [id]
+        "401": { $ref: "#/components/responses/Error" }
+
+  /pipelines/connectors:
+    post:
+      summary: 커넥터 등록
+      description: |
+        장비 PC 하나가 커넥터 하나다. PAT 소유자가 속한 부서(`workspace_id`) 안에서만
+        만들 수 있다 — 남의 부서에 파일을 밀어 넣을 수 없어야 한다.
+        같은 `hostname` 으로 다시 등록하면 새로 만들지 않고 기존 것을 돌려준다
+        (재설치 뒤 커넥터가 둘이 되면 관리 화면이 헷갈린다).
+      tags: [connectors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectorCreate" }
+      responses:
+        "201":
+          description: 만들었거나(신규) 이미 있던 것
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorOut" }
+        "403":
+          description: 그 부서의 구성원이 아니다 (`MNX-PIPE-0005`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    get:
+      summary: 커넥터 목록 (관리 화면)
+      description: 가시 범위는 재료·프로파일과 같다 — 내 부서 것. 시스템 관리자는 전부.
+      tags: [connectors]
+      responses:
+        "200":
+          description: 목록. 마지막 heartbeat 와 대기·실패 수가 함께 온다
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ConnectorOut" }
+
+  /pipelines/connectors/{connector_id}:
+    patch:
+      summary: 커넥터 이름·활성 여부
+      tags: [connectors]
+      parameters: [{ $ref: "#/components/parameters/ConnectorId" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: 「안 보낸 것」과 「비운 것」을 구별한다 — 없는 키는 그대로 둔다
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                is_active: { type: boolean }
+      responses:
+        "200":
+          description: 고친 결과
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorOut" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /pipelines/connectors/{connector_id}/heartbeat:
+    post:
+      summary: 상태 보고
+      description: |
+        전송 배치가 끝날 때마다 한 번. 관리 화면이 "마지막 전송 3시간 전" 을 보여 주는
+        근거다. 실패해도 MatPylon 은 전송을 멈추지 않는다.
+      tags: [connectors]
+      parameters: [{ $ref: "#/components/parameters/ConnectorId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HeartbeatIn" }
+      responses:
+        "200":
+          description: 서버 시각과 설정 힌트
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatOut" }
+        "404":
+          description: 커넥터 없음 또는 비활성 (`MNX-PIPE-0001`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /pipelines/inbox:
+    post:
+      summary: 파일 반입
+      description: |
+        원본을 받아 수집함에 넣고 202 를 준다 — 파싱은 워커가 한다(기존 `jobs` 큐).
+
+        서버 쪽 처리 순서:
+        1. `filestore/inbox/YYYY/MM/<id>/source/<파일명>` 에 저장, sha256 계산.
+           `client_sha256` 과 다르면 `MNX-PIPE-0003`(400) — 전송 중 깨진 것이다.
+        2. 같은 sha256 의 `TestRun`(삭제 안 된 것) 이나 `InboxItem` 이 있으면
+           **409 `MNX-PIPE-0004`** 에 `details.existing_id` 를 실어 준다.
+           MatPylon 은 이것을 "보냄" 으로 닫는다 — 서버 원장이 정본이다.
+        3. 워커: `/test-types/detect` 와 같은 지문으로 프로파일·시험 종류 추정 → 파싱
+           → 프로파일 `identity` + `hints` 로 재료·시료·시편 후보 조회.
+        4. 후보가 정확히 하나면 기존 업로드 경로로 `TestRun` 생성(원본을 test-runs 로
+           이동), `registered`. 0 또는 2 이상이면 `needs_specimen` — 부서 관리자에게 알림.
+      tags: [inbox]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/InboxUpload" }
+            encoding:
+              hints: { contentType: application/json }
+      responses:
+        "202":
+          description: 받았다. 아직 안 끝났다
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxItemOut" }
+        "400":
+          description: 해시 불일치 `MNX-PIPE-0003` · 힌트 JSON 아님 `MNX-PIPE-0006`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: 커넥터 없음 `MNX-PIPE-0001` · 소스 키 모름 `MNX-PIPE-0002`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: 같은 내용이 이미 있음 `MNX-PIPE-0004` (`details.existing_id`, `details.existing_kind` = `test_run` | `inbox_item`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "413":
+          description: 너무 큼 `MNX-FILES-0001` (기존 코드 재사용)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    get:
+      summary: 수집함 목록 (관리 화면)
+      tags: [inbox]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/InboxStatus" }
+        - name: connector_id
+          in: query
+          schema: { type: string, format: uuid }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: 페이지 (기존 `shared/pagination.Page`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/InboxItemOut" }
+                  total: { type: integer }
+                  page: { type: integer }
+                  size: { type: integer }
+
+  /pipelines/inbox/{item_id}:
+    get:
+      summary: 수집함 항목 상세
+      tags: [inbox]
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      responses:
+        "200":
+          description: 파싱 결과 요약·시편 후보·오류
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxItemDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /pipelines/inbox/{item_id}/assign:
+    post:
+      summary: 사람이 시편을 붙인다 → TestRun 생성
+      tags: [inbox]
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                specimen_id: { type: string, format: uuid }
+                test_type: { type: string, description: "비우면 감지된 것" }
+              required: [specimen_id]
+      responses:
+        "200":
+          description: 만들어진 시험 (기존 `TestRunOut`)
+          content:
+            application/json:
+              schema: { type: object, description: "app.modules.tests.schemas.TestRunOut" }
+        "409":
+          description: 이미 등록됐거나 버려진 항목 `MNX-PIPE-0007`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /pipelines/inbox/{item_id}/discard:
+    post:
+      summary: 버린다 (사유 필수)
+      tags: [inbox]
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string, minLength: 1, maxLength: 500 } }
+              required: [reason]
+      responses:
+        "204": { description: 버렸다. 원본은 보존 기간까지 남는다 }
+
+  /pipelines/inbox/{item_id}/retry:
+    post:
+      summary: 프로파일을 고친 뒤 다시 파싱
+      tags: [inbox]
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      responses:
+        "202":
+          description: 큐에 넣었다
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxItemOut" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: "`Authorization: Bearer mnx_pat_…` — 개인 액세스 토큰"
+
+  parameters:
+    ConnectorId:
+      name: connector_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ItemId:
+      name: item_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Error:
+      description: 오류 엔벨로프 (ADR 0001)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, pattern: "^MNX-[A-Z]+-\\d{4}$", examples: ["MNX-PIPE-0004"] }
+            message: { type: string }
+            request_id: { type: string }
+            details: { type: object, additionalProperties: true }
+          required: [code, message, request_id]
+      required: [error]
+
+    ConnectorCreate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, description: "사람이 보는 이름. 예: 인장기-1 (2공장)" }
+        hostname: { type: string, maxLength: 255, description: "os.hostname(). 재등록 판정 키" }
+        workspace_id: { type: string, format: uuid }
+      required: [name, hostname, workspace_id]
+
+    ConnectorOut:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        hostname: { type: string }
+        workspace_id: { type: string, format: uuid }
+        is_active: { type: boolean }
+        app_version: { type: [string, "null"], description: "마지막 heartbeat 의 값" }
+        last_seen_at: { type: [string, "null"], format: date-time }
+        next_run_at: { type: [string, "null"], format: date-time }
+        pending: { type: integer, description: "마지막 heartbeat 기준 대기 합" }
+        failed: { type: integer }
+        created_by_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+      required: [id, name, hostname, workspace_id, is_active, pending, failed, created_at]
+
+    HeartbeatIn:
+      type: object
+      properties:
+        app_version: { type: string }
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string, description: "MatPylon 소스 키 = inbox 의 source_key" }
+              pending: { type: integer }
+              failed: { type: integer }
+              last_sent_at: { type: [string, "null"], format: date-time }
+            required: [key, pending, failed, last_sent_at]
+        next_run_at: { type: [string, "null"], format: date-time }
+      required: [app_version, sources, next_run_at]
+
+    HeartbeatOut:
+      type: object
+      properties:
+        server_time: { type: string, format: date-time }
+        upload_limit_bytes: { type: integer, description: "MatPylon 이 413 을 미리 피하도록. 없으면 제한을 모름" }
+      required: [server_time]
+
+    InboxUpload:
+      type: object
+      description: multipart/form-data. `file` 은 마지막 파트여야 스트리밍이 된다
+      properties:
+        connector_id: { type: string, format: uuid }
+        source_key: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{1,39}$" }
+        client_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        client_path: { type: string, description: "장비 PC 의 원 경로. 사람이 추적할 때 쓴다" }
+        mtime: { type: string, format: date-time, description: "장비가 파일을 마지막으로 쓴 시각" }
+        hints: { $ref: "#/components/schemas/Hints" }
+        file: { type: string, format: binary }
+      required: [connector_id, source_key, client_sha256, client_path, mtime, hints, file]
+
+    Hints:
+      type: object
+      description: |
+        MatPylon 이 파일명 규칙에서 뽑은 **힌트**. 확정이 아니다 — 서버가 프로파일
+        `identity` 와 함께 후보를 좁히는 데 쓴다. 키는 이 일곱 개만. 나머지는 무시.
+      properties:
+        material_code: { type: string }
+        lot: { type: string }
+        specimen: { type: string }
+        orientation: { type: string }
+        tested_at: { type: string }
+        operator: { type: string }
+        instrument: { type: string }
+      additionalProperties: false
+
+    InboxStatus:
+      type: string
+      enum: [received, parsed, needs_specimen, registered, failed, discarded]
+      description: |
+        received       저장됨, 워커 대기
+        parsed         파싱 성공, 시편 후보 조회 중 (짧게 지나감)
+        needs_specimen 후보가 0 또는 2 이상 — 사람이 붙인다
+        registered     TestRun 이 됐다 (`test_run_id`)
+        failed         파싱 실패 (`error`) — 프로파일을 고치고 retry
+        discarded      사람이 버렸다
+
+    InboxItemOut:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/InboxStatus" }
+        connector_id: { type: string, format: uuid }
+        source_key: { type: string }
+        filename: { type: string }
+        size: { type: integer }
+        sha256: { type: string }
+        hints: { $ref: "#/components/schemas/Hints" }
+        test_type_key: { type: [string, "null"] }
+        profile_key: { type: [string, "null"] }
+        test_run_id: { type: [string, "null"], format: uuid }
+        error: { type: [string, "null"] }
+        received_at: { type: string, format: date-time }
+      required: [id, status, connector_id, source_key, filename, size, sha256, hints, received_at]
+
+    InboxItemDetail:
+      allOf:
+        - { $ref: "#/components/schemas/InboxItemOut" }
+        - type: object
+          properties:
+            client_path: { type: string }
+            mtime: { type: string, format: date-time }
+            candidates:
+              type: array
+              description: 시편 후보. 0개면 왜 없는지 `error` 에, 2개 이상이면 여기서 고른다
+              items:
+                type: object
+                properties:
+                  specimen_id: { type: string, format: uuid }
+                  specimen_name: { type: string }
+                  material_name: { type: string }
+                  sample_name: { type: string }
+                  reason: { type: string, description: "어느 힌트·identity 로 맞았나" }
+            summary:
+              type: object
+              description: 파싱 결과 요약 — 채널 키·행 수·요약값 몇 개. 사람이 "맞는 파일인가" 볼 만큼만
+              additionalProperties: true
