@@ -14,6 +14,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
+      # Electron 115MB 와 NSIS 를 매번 GitHub 릴리스에서 받는다. 한 번은 다운로드 중
+      # 연결이 끊겨 빌드가 죽었다(2026-08-28). 받은 것을 캐시에 두면 그 구간이 사라진다.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
