@@ -33,6 +33,21 @@ export interface WorkspaceItem {
   is_active: boolean;
 }
 
+/** 규칙 편집기의 「MatNexus 대조」 한 줄. 엔진 타입과 같은 모양이지만 여기 다시 적는다. */
+export interface ResolveItem {
+  outcome: "unique" | "multiple" | "none";
+  label: string;
+  /** unique 면 시편 전체 이름, multiple 면 후보 수, none 이면 이유. */
+  detail: string;
+}
+
+export interface ReferenceMaterial {
+  name: string;
+  grade: string | null;
+  aliases: string[];
+  samples: { name: string; lot: string; seq_no: number; specimens: { name: string; short: string; orientation: string | null }[] }[];
+}
+
 export interface ConnectionCheck {
   ok: boolean;
   user?: string;
@@ -56,6 +71,9 @@ export interface MatPylonApi {
   registerConnector(url: string, name: string, workspaceId: string): Promise<{ id: string }>;
   /** 토큰 주인이 속한 부서 목록. 연결 확인 뒤 마법사가 고르게 한다. */
   listWorkspaces(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<WorkspaceItem[]>;
+  /** 저장된 서버 설정으로. 서버가 없거나 엔드포인트가 없으면(404) null. */
+  resolveHints(hints: Record<string, string>[]): Promise<ResolveItem[] | null>;
+  reference(): Promise<ReferenceMaterial[] | null>;
   listFiles(status?: string): Promise<LedgerRow[]>;
   requeue(id: number): Promise<void>;
   /** 폴더 선택 대화상자. 취소하면 null. */
@@ -90,6 +108,8 @@ export const CHANNELS = {
   testConnection: "engine:testConnection",
   registerConnector: "engine:registerConnector",
   listWorkspaces: "engine:listWorkspaces",
+  resolveHints: "engine:resolveHints",
+  reference: "engine:reference",
   listFiles: "engine:listFiles",
   requeue: "engine:requeue",
   pickFolder: "app:pickFolder",

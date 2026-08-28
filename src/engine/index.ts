@@ -14,7 +14,7 @@ import { mkdirSync, renameSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { EngineStatus } from "@shared/ipc";
 import { loadConfig, saveConfig, type Config } from "./config";
-import { extractHints } from "./hints";
+import { extractHints, mergeHints } from "./hints";
 import { Ledger, type FileRow } from "./ledger";
 import { scanSource } from "./scanner";
 import { nextRunAt } from "./scheduler";
@@ -203,7 +203,7 @@ export class Engine extends EventEmitter {
       path: row.path,
       sha256: row.sha256!,
       mtimeMs: row.mtime_ms,
-      hints: extractHints(source.filenameRule, path.basename(row.path)),
+      hints: mergeHints(source.defaults, extractHints(source.filenameRule, path.basename(row.path))),
     });
     switch (result.kind) {
       case "sent":

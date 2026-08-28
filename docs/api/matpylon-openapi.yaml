@@ -457,12 +457,15 @@ components:
           type: string
           enum: [unique, multiple, none]
           description: unique=자동 등록됨 · multiple=후보 여럿(수집함행) · none=0건
-        candidate: { $ref: "#/components/schemas/Candidate" }
+        candidate:
+          oneOf: [{ $ref: "#/components/schemas/Candidate" }, { type: "null" }]
+          description: unique 일 때만. 그 외 null
         candidates:
           type: array
+          description: 항상 온다 — unique 면 하나, multiple 이면 여럿, none 이면 빈 배열 (v1.146.0 구현)
           items: { $ref: "#/components/schemas/Candidate" }
         reason: { type: string, description: "none 일 때 왜. 워커가 error 에 적는 문구와 같다" }
-      required: [outcome]
+      required: [outcome, candidate, candidates]
 
     Candidate:
       type: object
@@ -489,21 +492,26 @@ components:
               aliases: { type: array, items: { type: string } }
               samples:
                 type: array
+                description: 시료가 하나도 없는 재료는 트리에서 빠진다 — 붙을 데가 없다
                 items:
                   type: object
                   properties:
                     id: { type: string, format: uuid }
-                    lot: { type: string }
+                    name: { type: string, description: "전체 이름 (SECC_MDOI_1.0__01)" }
+                    lot: { type: string, description: "로트. 없으면 빈 문자열" }
+                    seq_no: { type: integer }
                     specimens:
                       type: array
                       items:
                         type: object
                         properties:
                           id: { type: string, format: uuid }
-                          name: { type: string }
+                          name: { type: string, description: "전체 이름 (SECC_MDOI_1.0__01__MD_01)" }
+                          short: { type: string, description: "끝자리 (MD_01). 시편 힌트는 이것과도 맞는다" }
                           orientation: { type: [string, "null"] }
-                        required: [id, name]
-                  required: [id, lot, specimens]
+                          seq_no: { type: integer }
+                        required: [id, name, short, seq_no]
+                  required: [id, name, lot, seq_no, specimens]
             required: [id, name, aliases, samples]
       required: [materials, generated_at]
 

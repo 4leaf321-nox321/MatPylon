@@ -172,6 +172,54 @@ app.whenReady().then(() => {
     const list = await engine.client(url, null, tls).listWorkspaces();
     return list.map((w) => ({ id: w.id, name: w.name, path: w.path, is_active: w.is_active }));
   });
+  // 규칙 편집기의 대조·참조. 서버가 없거나 저쪽에 아직 엔드포인트가 없으면 null — 화면은 힌트만 보인다.
+  const workspaceOf = async () => {
+    const c = engine.getConfig();
+    if (!c.server.url || !c.server.connectorId || !engine.secrets.getToken()) return null;
+    const mine = await engine.client().listConnectors();
+    return mine.find((x) => x.id === c.server.connectorId)?.workspace_id ?? null;
+  };
+  ipcMain.handle(CHANNELS.resolveHints, async (_e, hints: Record<string, string>[]) => {
+    try {
+      const ws = await workspaceOf();
+      if (!ws) return null;
+      const results = await engine.client().resolve(ws, hints);
+      return results.map((r) => ({
+        outcome: r.outcome,
+        label: r.outcome === "unique" ? "자동 등록" : r.outcome === "multiple" ? `후보 ${r.candidates.length}개` : "수집함행",
+        detail:
+          r.outcome === "unique"
+            ? (r.candidate?.specimen_name ?? "")
+            : r.outcome === "multiple"
+              ? r.candidates.map((c) => c.specimen_name).join(", ")
+              : (r.reason ?? ""),
+      }));
+    } catch (e) {
+      log.warn("resolve 실패: %s", (e as Error).message);
+      return null;
+    }
+  });
+  ipcMain.handle(CHANNELS.reference, async () => {
+    try {
+      const ws = await workspaceOf();
+      if (!ws) return null;
+      const tree = await engine.client().reference(ws);
+      return tree.materials.map((m) => ({
+        name: m.name,
+        grade: m.grade,
+        aliases: m.aliases,
+        samples: m.samples.map((s) => ({
+          name: s.name,
+          lot: s.lot,
+          seq_no: s.seq_no,
+          specimens: s.specimens.map((p) => ({ name: p.name, short: p.short, orientation: p.orientation })),
+        })),
+      }));
+    } catch (e) {
+      log.warn("reference 실패: %s", (e as Error).message);
+      return null;
+    }
+  });
   ipcMain.handle(CHANNELS.listFiles, (_e, status?: string) =>
     engine.files(status as Parameters<Engine["files"]>[0]),
   );

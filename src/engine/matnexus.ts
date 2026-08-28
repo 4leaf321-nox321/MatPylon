@@ -11,6 +11,7 @@ import { openAsBlob, readFileSync } from "node:fs";
 import path from "node:path";
 import { Agent, fetch as undiciFetch, type Dispatcher, type RequestInit } from "undici";
 import type { SecretStore } from "./secrets";
+import type { Hints } from "./hints";
 import type { Delivery, DeliveryResult, Transport } from "./transport";
 
 export interface ServerError {
@@ -34,6 +35,41 @@ export interface WorkspaceOut {
   path: string;
   kind: string;
   is_active: boolean;
+}
+
+/** `POST /pipelines/resolve` — 힌트 하나의 판정. 워커와 같은 함수의 결과다. */
+export interface ResolveResult {
+  outcome: "unique" | "multiple" | "none";
+  candidate: Candidate | null;
+  candidates: Candidate[];
+  reason?: string;
+}
+
+export interface Candidate {
+  specimen_id: string;
+  specimen_name: string;
+  material_name: string;
+  sample_name: string;
+  reason: string;
+}
+
+/** `GET /pipelines/reference` — 이름 트리. 화면이 참조로만 본다. */
+export interface ReferenceTree {
+  generated_at: string;
+  materials: {
+    id: string;
+    name: string;
+    grade: string | null;
+    /** 워커가 material_code 를 맞출 때 보는 집합(이름·grade·별칭). */
+    aliases: string[];
+    samples: {
+      id: string;
+      name: string;
+      lot: string;
+      seq_no: number;
+      specimens: { id: string; name: string; short: string; orientation: string | null; seq_no: number }[];
+    }[];
+  }[];
 }
 
 export interface HeartbeatIn {
@@ -132,6 +168,19 @@ export class MatNexusClient implements Transport {
 
   me(): Promise<Me> {
     return this.request("GET", "/auth/me");
+  }
+
+  /** 규칙 편집기의 「MatNexus 대조」. 힌트 ≤50개, 같은 순서로 돌아온다. */
+  resolve(workspaceId: string, hints: Hints[]): Promise<ResolveResult[]> {
+    return this.request<{ results: ResolveResult[] }>(
+      "POST",
+      "/pipelines/resolve",
+      JSON.stringify({ workspace_id: workspaceId, hints: hints.slice(0, 50) }),
+    ).then((r) => r.results);
+  }
+
+  reference(workspaceId: string): Promise<ReferenceTree> {
+    return this.request("GET", `/pipelines/reference?workspace_id=${encodeURIComponent(workspaceId)}`);
   }
 
   /** PAT 주인이 속한 부서. 마법사가 부서 ID 를 손으로 베끼지 않게 목록에서 고른다. */

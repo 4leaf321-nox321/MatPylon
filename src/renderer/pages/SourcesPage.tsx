@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Config, Source } from "@engine/config";
 import { HINT_KEYS } from "@shared/hint-keys";
-import { checkRule, extractHints } from "@engine/hints";
+import { checkRule, extractHints, mergeHints } from "@engine/hints";
+import type { ReferenceMaterial, ResolveItem } from "@shared/ipc";
 import { useConfig } from "../hooks";
 import { Badge, Button, Card, Field, Input, Toggle } from "../ui";
 
@@ -14,6 +15,7 @@ const EMPTY: Source = {
   stableMinutes: 2,
   filenameRule: null,
   moveAfterSendTo: null,
+  defaults: { material_code: null, lot: null },
   enabled: true,
 };
 
@@ -144,6 +146,12 @@ export function SourceEditor({
   const [rule, setRule] = useState(source.filenameRule ?? "");
   const [move, setMove] = useState(source.moveAfterSendTo ?? "");
   const [names, setNames] = useState<string[]>([]);
+  const [defMaterial, setDefMaterial] = useState(source.defaults.material_code ?? "");
+  const [defLot, setDefLot] = useState(source.defaults.lot ?? "");
+  /** 서버 대조 결과. null = 서버 없음/미지원 → 열을 숨긴다. */
+  const [resolved, setResolved] = useState<ResolveItem[] | null>(null);
+  const [reference, setReference] = useState<ReferenceMaterial[] | null | "loading">(null);
+  const [refQuery, setRefQuery] = useState("");
 
   useEffect(() => {
     if (s.path) void window.matpylon.listFilenames(s.path, 20).then(setNames);
@@ -152,9 +160,38 @@ export function SourceEditor({
 
   const ruleCheck = useMemo(() => (rule ? checkRule(rule) : null), [rule]);
   const preview = useMemo(
-    () => names.map((n) => ({ n, hints: extractHints(rule || null, n) })),
-    [names, rule],
+    () =>
+      names.map((n) => ({
+        n,
+        hints: mergeHints(
+          { material_code: defMaterial.trim() || null, lot: defLot.trim() || null },
+          extractHints(rule || null, n),
+        ),
+      })),
+    [names, rule, defMaterial, defLot],
   );
+
+  // 규칙·기본값이 바뀌면 잠깐 뒤 서버에 물어본다. 타자마다 부르지 않는다.
+  useEffect(() => {
+    if (!preview.length) {
+      setResolved(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      void window.matpylon.resolveHints(preview.map((p) => p.hints as Record<string, string>)).then(setResolved);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [preview]);
+
+  const loadReference = async () => {
+    setReference("loading");
+    setReference(await window.matpylon.reference());
+  };
+  const refFiltered = useMemo(() => {
+    if (!reference || reference === "loading") return [];
+    const q = refQuery.trim().toLowerCase();
+    return q ? reference.filter((m) => m.aliases.some((a) => a.toLowerCase().includes(q))) : reference;
+  }, [reference, refQuery]);
   const keyTaken = existingKeys.includes(s.key);
   const canSubmit = Boolean(s.name && s.key && s.path) && !keyTaken;
 
@@ -167,6 +204,7 @@ export function SourceEditor({
         .map((e) => (e.startsWith(".") ? e : `.${e}`).toLowerCase()),
       filenameRule: rule.trim() || null,
       moveAfterSendTo: move.trim() || null,
+      defaults: { material_code: defMaterial.trim() || null, lot: defLot.trim() || null },
     });
 
   return (
@@ -226,6 +264,21 @@ export function SourceEditor({
         </div>
       </Card>
 
+      <Card title="이 폴더의 기본값 (선택)">
+        <p className="mb-2 text-xs text-slate-500">
+          장비는 대개 파일명에 시편 번호만 적습니다. 이 폴더의 파일이 전부 한 재료·한 로트라면 여기 고정하고,
+          파일명 규칙은 시편만 뽑게 하세요. 파일명 규칙이 뽑은 값이 있으면 그쪽이 이깁니다.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="재료 코드" hint="MatNexus 재료의 이름·grade·별칭 중 하나와 정확히 같아야 합니다">
+            <Input value={defMaterial} onChange={(e) => setDefMaterial(e.target.value)} placeholder="예: SECC_MDOI_1.0" />
+          </Field>
+          <Field label="로트" hint="시료의 로트">
+            <Input value={defLot} onChange={(e) => setDefLot(e.target.value)} placeholder="예: L240612" />
+          </Field>
+        </div>
+      </Card>
+
       <Card title="파일명 규칙 (선택)">
         <Field
           label="정규식"
@@ -246,11 +299,26 @@ export function SourceEditor({
         )}
         {names.length > 0 && (
           <div className="mt-3">
-            <div className="mb-1 text-xs font-medium text-slate-600">미리보기 — 폴더의 파일 {names.length}개</div>
+            <div className="mb-1 flex items-center justify-between text-xs font-medium text-slate-600">
+              <span>미리보기 — 폴더의 파일 {names.length}개</span>
+              {resolved && (
+                <span className="font-normal text-slate-500">
+                  MatNexus 대조: 자동 등록 {resolved.filter((r) => r.outcome === "unique").length} / {resolved.length}
+                  — 파일 안의 identity 가 있으면 그것이 힌트를 이깁니다
+                </span>
+              )}
+            </div>
             <table className="w-full text-xs">
+              <thead className="text-left text-slate-400">
+                <tr>
+                  <th className="py-1 font-normal">파일</th>
+                  <th className="font-normal">힌트</th>
+                  {resolved && <th className="font-normal">MatNexus 대조</th>}
+                </tr>
+              </thead>
               <tbody>
-                {preview.map(({ n, hints }) => (
-                  <tr key={n} className="border-t border-slate-100">
+                {preview.map(({ n, hints }, i) => (
+                  <tr key={n} className="border-t border-slate-100 align-top">
                     <td className="py-1 font-mono">{n}</td>
                     <td className="text-slate-600">
                       {Object.keys(hints).length
@@ -261,10 +329,65 @@ export function SourceEditor({
                           ? "— 규칙에 안 맞음"
                           : ""}
                     </td>
+                    {resolved && (
+                      <td>
+                        {resolved[i] && (
+                          <>
+                            <Badge tone={resolved[i].outcome === "unique" ? "ok" : resolved[i].outcome === "multiple" ? "warn" : "bad"}>
+                              {resolved[i].label}
+                            </Badge>{" "}
+                            <span className="text-slate-600">{resolved[i].detail}</span>
+                          </>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </Card>
+
+      <Card
+        title="MatNexus 참조 — 재료 › 시료(로트) › 시편"
+        actions={
+          reference === null ? (
+            <Button onClick={loadReference}>불러오기</Button>
+          ) : (
+            <Input className="w-56" placeholder="재료 검색" value={refQuery} onChange={(e) => setRefQuery(e.target.value)} />
+          )
+        }
+      >
+        {reference === null && (
+          <p className="text-xs text-slate-500">
+            파일명이 어느 이름과 맞아야 붙는지 보면서 규칙을 잡습니다. 서버에 연결돼 있어야 합니다.
+          </p>
+        )}
+        {reference === "loading" && <p className="text-xs text-slate-400">불러오는 중…</p>}
+        {Array.isArray(reference) && reference.length === 0 && (
+          <p className="text-xs text-slate-500">서버에서 받지 못했거나(연결·권한) 이 부서에 시료가 있는 재료가 없습니다.</p>
+        )}
+        {refFiltered.length > 0 && (
+          <div className="max-h-72 overflow-auto text-xs">
+            {refFiltered.slice(0, 50).map((m) => (
+              <details key={m.name} className="border-t border-slate-100 py-1">
+                <summary className="cursor-pointer">
+                  <span className="font-medium">{m.name}</span>{" "}
+                  <span className="text-slate-400">맞는 재료 코드: {m.aliases.join(" · ")}</span>
+                </summary>
+                <ul className="ml-4 mt-1 space-y-1">
+                  {m.samples.map((s) => (
+                    <li key={s.name}>
+                      <span className="font-mono">{s.name}</span>{" "}
+                      <span className="text-slate-500">로트 {s.lot || "(없음)"}</span>
+                      <span className="ml-2 text-slate-500">시편: {s.specimens.map((p) => p.short).join(", ")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ))}
+            {refFiltered.length > 50 && <p className="py-1 text-slate-400">… {refFiltered.length - 50}개 더. 검색으로 좁히세요</p>}
           </div>
         )}
       </Card>

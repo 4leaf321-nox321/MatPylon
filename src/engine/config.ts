@@ -20,6 +20,14 @@ export const SourceSchema = z.object({
   stableMinutes: z.number().int().min(0).max(1440).default(2),
   /** 파일명 → 힌트. 이름 있는 그룹(`(?<material_code>...)`)만 뜻이 있다. */
   filenameRule: z.string().nullable().default(null),
+  /** 소스 기본값 — "이 폴더 파일은 전부 이 재료·로트". 파일명에 없는 힌트를 채운다.
+   * 장비는 대개 시편 번호만 적는다. 파일명 규칙이 뽑은 값이 있으면 그쪽이 이긴다. */
+  defaults: z
+    .object({
+      material_code: z.string().nullable().default(null),
+      lot: z.string().nullable().default(null),
+    })
+    .default({}),
   /** 보낸 뒤 원본을 옮길 하위 폴더 이름. null 이면 제자리(기본, 결정 D). */
   moveAfterSendTo: z.string().nullable().default(null),
   enabled: z.boolean().default(true),

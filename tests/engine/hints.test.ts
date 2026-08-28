@@ -23,3 +23,16 @@ describe("hints", () => {
     expect(checkRule("(").ok).toBe(false);
   });
 });
+
+describe("소스 기본값과 파일명 힌트", () => {
+  it("기본값이 빈 칸을 채우고, 파일명이 뽑은 값이 이긴다", async () => {
+    const { mergeHints } = await import("@engine/hints");
+    expect(mergeHints({ material_code: "SECC_MDOI_1.0", lot: "L240612" }, { specimen: "MD_01" })).toEqual({
+      material_code: "SECC_MDOI_1.0",
+      lot: "L240612",
+      specimen: "MD_01",
+    });
+    expect(mergeHints({ material_code: "X", lot: null }, { material_code: "Y" })).toEqual({ material_code: "Y" });
+    expect(mergeHints({}, {})).toEqual({});
+  });
+});

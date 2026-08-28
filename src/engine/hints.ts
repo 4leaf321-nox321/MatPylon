@@ -26,6 +26,14 @@ export function checkRule(rule: string): RuleCheck {
   return { ok: true, unknownGroups };
 }
 
+/** 소스 기본값 위에 파일명 규칙의 값을 덮는다 — 파일이 말한 것이 설정보다 구체적이다. */
+export function mergeHints(defaults: { material_code?: string | null; lot?: string | null }, fromName: Hints): Hints {
+  const out: Hints = {};
+  if (defaults.material_code) out.material_code = defaults.material_code;
+  if (defaults.lot) out.lot = defaults.lot;
+  return { ...out, ...fromName };
+}
+
 export function extractHints(rule: string | null, filename: string): Hints {
   if (!rule) return {};
   let re: RegExp;
