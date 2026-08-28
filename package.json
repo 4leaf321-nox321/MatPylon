@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.node.json && vite build",
-    "package": "node scripts/make-icon.mjs && npm run build && electron-builder --win",
+    "package": "node scripts/make-icon.mjs && npm run build && electron-builder --win --publish never",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
