@@ -98,6 +98,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 100 }
                 is_active: { type: boolean }
+                auto_register: { type: boolean }
       responses:
         "200":
           description: 고친 결과
@@ -277,7 +278,7 @@ paths:
 
   /pipelines/inbox/{item_id}/assign:
     post:
-      summary: 사람이 시편을 붙인다 → TestRun 생성
+      summary: 사람이 시편을 붙인다 → TestRun 생성 (suggested 의 한 건 승인도 이것)
       tags: [inbox]
       parameters: [{ $ref: "#/components/parameters/ItemId" }]
       requestBody:
@@ -320,6 +321,46 @@ paths:
               required: [reason]
       responses:
         "204": { description: 버렸다. 원본은 보존 기간까지 남는다 }
+
+  /pipelines/inbox/approve:
+    post:
+      summary: suggested 여럿을 한꺼번에 승인 (요청서 3)
+      description: |
+        각 항목을 저장된 candidates[0] 으로 등록한다. 되는 것은 하고, 안 된 것은 이름을
+        말한다 — 한 건이 막혀도 나머지는 진행. 권한은 assign 과 같다.
+      tags: [inbox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                item_ids:
+                  type: array
+                  maxItems: 100
+                  items: { type: string, format: uuid }
+              required: [item_ids]
+      responses:
+        "200":
+          description: 요청과 같은 순서
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item_id: { type: string, format: uuid }
+                        ok: { type: boolean }
+                        test_run_id: { type: [string, "null"], format: uuid }
+                        test_run_name: { type: [string, "null"] }
+                        reason: { type: [string, "null"], description: "ok=false 일 때 왜" }
+                      required: [item_id, ok]
+                required: [results]
 
   /pipelines/inbox/{item_id}/retry:
     post:
@@ -379,6 +420,10 @@ components:
         name: { type: string, minLength: 1, maxLength: 100, description: "사람이 보는 이름. 예: 인장기-1 (2공장)" }
         hostname: { type: string, maxLength: 255, description: "os.hostname(). 재등록 판정 키" }
         workspace_id: { type: string, format: uuid }
+        auto_register:
+          type: boolean
+          default: false
+          description: 후보가 하나로 좁혀지면 승인 없이 등록할지. 기본은 승인 대기(요청서 3)
       required: [name, hostname, workspace_id]
 
     ConnectorOut:
@@ -389,6 +434,7 @@ components:
         hostname: { type: string }
         workspace_id: { type: string, format: uuid }
         is_active: { type: boolean }
+        auto_register: { type: boolean, description: "false 면 후보 1개도 suggested 로 승인 대기" }
         app_version: { type: [string, "null"], description: "마지막 heartbeat 의 값" }
         last_seen_at: { type: [string, "null"], format: date-time }
         next_run_at: { type: [string, "null"], format: date-time }
@@ -517,10 +563,11 @@ components:
 
     InboxStatus:
       type: string
-      enum: [received, parsed, needs_specimen, registered, failed, discarded]
+      enum: [received, parsed, suggested, needs_specimen, registered, failed, discarded]
       description: |
         received       저장됨, 워커 대기
         parsed         파싱 성공, 시편 후보 조회 중 (짧게 지나감)
+        suggested      후보 1개 + 커넥터 auto_register=false — 승인 대기, 제안은 candidates[0]
         needs_specimen 후보가 0 또는 2 이상 — 사람이 붙인다
         registered     TestRun 이 됐다 (`test_run_id`)
         failed         파싱 실패 (`error`) — 프로파일을 고치고 retry
