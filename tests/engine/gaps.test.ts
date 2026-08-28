@@ -1,5 +1,5 @@
 /** 되짚어 보다 찾은 결함의 회귀 테스트 — 각각 실제로 틀렸던 것이다. */
-import { chmodSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -110,6 +110,77 @@ describe("해시 불일치와 서버 한도", () => {
     await engine.sendNow();
     expect(engine.files("failed")).toHaveLength(1);
     expect(engine.files("failed")[0]?.last_error).toMatch(/재전송해도 같음/);
+    engine.close();
+  });
+});
+
+
+describe("폴더를 못 읽을 때 — 큐를 지우지 않는다", () => {
+  it("드라이브가 끊기면 사라짐으로 찍지 않고 오류를 낸다", async () => {
+    const dir = tmp("matpylon-drop-");
+    const file = path.join(dir, "a.tra");
+    const source = SourceSchema.parse({ key: "drop", name: "d", path: dir });
+    const ledger = new Ledger(":memory:");
+    write(file, "x");
+    await scanSource(source, ledger, T0);
+    expect((await scanSource(source, ledger, T0 + 3 * MIN)).ready).toBe(1);
+
+    // 드라이브가 사라졌다 — 폴더 자체를 못 읽는다
+    rmSync(dir, { recursive: true, force: true });
+    const r = await scanSource(source, ledger, T0 + 4 * MIN);
+    expect(r.unreadable).toBe(true);
+    expect(r.gone).toBe(0);
+    expect(r.errors[0]).toMatch(/폴더를 읽지 못했습니다/);
+    // 큐는 그대로다. 여기서 gone 이 되면 드라이브가 돌아와도 영영 안 간다.
+    expect(ledger.get("drop", file)?.status).toBe("ready");
+  });
+
+  it("사라짐으로 찍힌 파일이 그대로 다시 보이면 되살린다", async () => {
+    const dir = tmp("matpylon-back-");
+    const file = path.join(dir, "a.tra");
+    const source = SourceSchema.parse({ key: "back", name: "b", path: dir });
+    const ledger = new Ledger(":memory:");
+    write(file, "x");
+    await scanSource(source, ledger, T0);
+    await scanSource(source, ledger, T0 + 3 * MIN);
+
+    unlinkSync(file); // 사람이 지웠다고 본 상태
+    expect((await scanSource(source, ledger, T0 + 4 * MIN)).gone).toBe(1);
+    expect(ledger.get("back", file)?.status).toBe("gone");
+
+    write(file, "x"); // 같은 내용이 같은 자리에 다시 있다
+    const r = await scanSource(source, ledger, T0 + 5 * MIN);
+    expect(ledger.get("back", file)?.status).toBe("ready");
+    expect(r.ready).toBe(1);
+  });
+});
+
+describe("원장 정리는 하루에 한 번 다시 돈다", () => {
+  it("앱을 안 껐어도 보존 기간이 지난 행을 지운다", async () => {
+    const dataDir = tmp("matpylon-prune-");
+    const srcDir = tmp("matpylon-prune-src-");
+    let now = T0;
+    const engine = new Engine({
+      appVersion: "t",
+      dataDir,
+      transport: { configured: () => true, deliver: async () => ({ kind: "sent", serverId: "x" }) },
+      now: () => now,
+    });
+    const config = defaultConfig();
+    config.sources.push(SourceSchema.parse({ key: "keep", name: "k", path: srcDir }));
+    engine.setConfig(config);
+
+    const file = path.join(srcDir, "old.tra");
+    write(file, "old");
+    await engine.scan();
+    now += 3 * MIN;
+    await engine.sendNow();
+    expect(engine.files("sent")).toHaveLength(1);
+
+    unlinkSync(file); // 보낸 뒤 사람이 치웠다
+    now += 91 * DAY; // 앱은 계속 떠 있다 — 재시작 없이 91일
+    await engine.scan();
+    expect(engine.files()).toHaveLength(0);
     engine.close();
   });
 });

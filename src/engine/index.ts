@@ -22,6 +22,9 @@ import { HASH_MISMATCH, MatNexusClient } from "./matnexus";
 import { memorySecrets, type SecretStore } from "./secrets";
 import { noTransport, type Transport } from "./transport";
 
+/** 폴더를 못 읽었을 때의 말머리. 화면 오류를 걷을 때 이것으로 알아본다. */
+const UNREADABLE = "폴더를 읽지 못했습니다";
+
 export interface EngineOptions {
   appVersion: string;
   /** 설정·원장·로그가 사는 곳(`%APPDATA%\MatPylon`). 엔진은 이 경로를 받기만 한다. */
@@ -51,6 +54,7 @@ export class Engine extends EventEmitter {
   private sendAfterStabilize = false;
   private sendTimer: NodeJS.Timeout | null = null;
   private lastSendAt: number | null = null;
+  private lastPruneAt = 0;
   private lastError: string | null = null;
   /** heartbeat 가 알려 준 서버 한도. 모르면 null — 그냥 보내고 413 을 받는다. */
   private uploadLimit: number | null = null;
@@ -67,7 +71,16 @@ export class Engine extends EventEmitter {
     this.ledger = new Ledger(path.join(options.dataDir, "ledger.sqlite"));
     const recovered = this.ledger.recoverSending();
     if (recovered) this.log(`지난 실행에서 보내다 만 ${recovered}건을 다시 대기로`);
-    const pruned = this.ledger.prune(this.now() - this.config.retentionDays * 86_400_000);
+    this.maybePrune();
+  }
+
+  /** 원장 정리는 하루 한 번. **시작할 때만 돌면 안 된다** — 장비 PC 는 몇 달씩 안 끄므로
+   * 보존 기간 설정이 사실상 동작하지 않는다. */
+  private maybePrune(): void {
+    const now = this.now();
+    if (now - this.lastPruneAt < 24 * 3600_000) return;
+    this.lastPruneAt = now;
+    const pruned = this.ledger.prune(now - this.config.retentionDays * 86_400_000);
     if (pruned) this.log(`보존 기간(${this.config.retentionDays}일) 지난 원장 ${pruned}건 정리`);
   }
 
@@ -148,9 +161,12 @@ export class Engine extends EventEmitter {
   }
 
   async scan(): Promise<void> {
+    this.maybePrune();
+    let unreadable: string | null = null;
     for (const source of this.config.sources) {
       if (!source.enabled) continue;
       const r = await scanSource(source, this.ledger, this.now(), this.log);
+      if (r.unreadable) unreadable = `[${source.name}] ${r.errors[0] ?? UNREADABLE}`;
       if (r.ready || r.duplicate || r.gone || r.errors.length)
         this.log(
           `[${source.key}] 본 것 ${r.observed} · 준비 ${r.ready} · 중복 ${r.duplicate} · 사라짐 ${r.gone}` +
@@ -158,6 +174,10 @@ export class Engine extends EventEmitter {
         );
       for (const e of r.errors) this.log(`  ${e}`);
     }
+    // 폴더가 안 읽히면 수집이 통째로 멈춘다. 조용히 지나가면 아무도 모른 채 며칠이 간다 —
+    // 화면과 트레이 알림에 띄운다. 다시 읽히면 스스로 걷는다.
+    if (unreadable) this.lastError = unreadable;
+    else if (this.lastError?.includes(UNREADABLE)) this.lastError = null;
     this.armRescan();
     // 「지금 보내기」가 쓰는 중인 파일에 막혀 있었다면, 대기로 넘어온 지금 이어서 보낸다.
     if (this.sendAfterStabilize && this.ledger.due(this.now()).length > 0) {

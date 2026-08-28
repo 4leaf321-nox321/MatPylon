@@ -1,7 +1,7 @@
 {
   "name": "matpylon",
   "productName": "MatPylon",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "시험장비 PC 수집 에이전트 — MatNexus 에 장비 파일을 배달한다",
   "private": true,
   "main": "dist-electron/main.js",
@@ -13,7 +13,7 @@
     "package": "node scripts/make-icon.mjs && npm run build && electron-builder --win --publish never",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "pretest": "npm rebuild better-sqlite3 --silent",
     "predev": "electron-rebuild -f -w better-sqlite3"
@@ -26,6 +26,9 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.17.0",
     "@types/react": "^18.3.12",
@@ -34,11 +37,15 @@
     "autoprefixer": "^10.4.20",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "jsdom": "^29.1.1",
     "postcss": "^8.4.47",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.68.0",
     "vite": "^5.4.10",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6",

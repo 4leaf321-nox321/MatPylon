@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LedgerRow } from "@shared/ipc";
 import { useStatus } from "../hooks";
 import { Button, Card, Select, fmtBytes, fmtTime } from "../ui";
@@ -20,10 +20,14 @@ export function HistoryPage() {
   const [filter, setFilter] = useState("");
   const [rows, setRows] = useState<LedgerRow[]>([]);
 
-  const load = () => window.matpylon.listFiles(filter || undefined).then(setRows);
+  const load = useCallback(
+    () => window.matpylon.listFiles(filter || undefined).then(setRows),
+    [filter],
+  );
+  // status 가 바뀌면(전송이 돌았으면) 목록도 다시 읽는다.
   useEffect(() => {
     void load();
-  }, [filter, status]);
+  }, [load, status]);
 
   const exportCsv = () => {
     const head = "status,source,path,size,attempts,first_seen,sent_at,server_id,error";

@@ -15,6 +15,8 @@ export interface ScanResult {
   duplicate: number;
   gone: number;
   errors: string[];
+  /** 폴더(또는 하위 폴더) 하나라도 못 읽었다. **이때는 사라짐 판정을 하지 않는다.** */
+  unreadable: boolean;
 }
 
 export function sha256File(file: string): Promise<string> {
@@ -45,17 +47,28 @@ function canOpen(file: string): boolean {
   return false;
 }
 
-function* walk(dir: string, recursive: boolean, skipDir: string | null): Generator<string> {
+/** 못 읽은 폴더를 `failed` 에 적는다 — **삼키지 않는다.**
+ *
+ * 실측 전 설계 결함: 여기서 조용히 빈 목록을 돌려주면 아래 사라짐 판정이 대기 중이던
+ * 파일을 전부 `gone` 으로 찍는다. 네트워크 드라이브가 1초 끊긴 것뿐인데 큐가 비고,
+ * 드라이브가 돌아와도 파일 내용이 그대로면 `gone` 인 채 영영 다시 안 잡힌다. */
+function* walk(
+  dir: string,
+  recursive: boolean,
+  skipDir: string | null,
+  failed: string[],
+): Generator<string> {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
+  } catch (e) {
+    failed.push(`${dir}: ${(e as Error).message}`);
     return;
   }
   for (const e of entries) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (recursive && e.name !== skipDir) yield* walk(full, true, skipDir);
+      if (recursive && e.name !== skipDir) yield* walk(full, true, skipDir, failed);
     } else if (e.isFile()) {
       yield full;
     }
@@ -68,11 +81,19 @@ export async function scanSource(
   now: number,
   log: (msg: string) => void = () => {},
 ): Promise<ScanResult> {
-  const result: ScanResult = { observed: 0, ready: 0, duplicate: 0, gone: 0, errors: [] };
+  const result: ScanResult = {
+    observed: 0,
+    ready: 0,
+    duplicate: 0,
+    gone: 0,
+    errors: [],
+    unreadable: false,
+  };
   const stableMs = source.stableMinutes * 60_000;
   const present = new Set<string>();
+  const failed: string[] = [];
 
-  for (const file of walk(source.path, source.recursive, source.moveAfterSendTo)) {
+  for (const file of walk(source.path, source.recursive, source.moveAfterSendTo, failed)) {
     const ext = path.extname(file).toLowerCase();
     if (source.extensions.length && !source.extensions.includes(ext)) continue;
     let st;
@@ -99,6 +120,14 @@ export async function scanSource(
     } catch (e) {
       result.errors.push(`${file}: ${(e as Error).message}`);
     }
+  }
+
+  // 폴더를 못 읽었으면 여기서 멈춘다. "안 보인다" 와 "못 봤다" 는 다르다 —
+  // 못 본 것을 사라졌다고 찍으면 큐가 통째로 날아간다.
+  if (failed.length) {
+    result.unreadable = true;
+    for (const f of failed) result.errors.push(`폴더를 읽지 못했습니다 — ${f}`);
+    return result;
   }
 
   // 원장에는 있는데 폴더에 없는 것 — 사람이 지웠거나 옮겼다. 보내지 않은 것만 표시한다.

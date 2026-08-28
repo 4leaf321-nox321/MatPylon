@@ -14,5 +14,14 @@
     "baseUrl": ".",
     "paths": { "@engine/*": ["src/engine/*"], "@shared/*": ["src/shared/*"] }
   },
-  "include": ["electron", "src/engine", "src/shared", "tests", "vite.config.ts", "vitest.config.ts"]
+  "//": "화면 테스트(tests/renderer)는 JSX·DOM 이 필요해 tsconfig.json 쪽이 본다.",
+  "include": [
+    "electron",
+    "src/engine",
+    "src/shared",
+    "tests/architecture",
+    "tests/engine",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

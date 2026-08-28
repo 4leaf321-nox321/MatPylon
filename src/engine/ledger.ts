@@ -107,6 +107,12 @@ export class Ledger {
         .run(sourceKey, path, size, mtimeMs, now, now);
       return this.get(sourceKey, path)!;
     }
+    if (row.status === "gone") {
+      // 사라졌다던 파일이 그대로 다시 보인다 — 드라이브가 잠깐 끊겼던 것이다. 되살린다.
+      // `observed_at` 은 그대로 둔다: 그때 이미 안정화가 끝나 있었다면 지금 바로 보낸다.
+      this.db.prepare("UPDATE files SET status = 'seen' WHERE id = ?").run(row.id);
+      return this.get(sourceKey, path)!;
+    }
     if (row.size !== size || row.mtime_ms !== mtimeMs) {
       this.db
         .prepare(

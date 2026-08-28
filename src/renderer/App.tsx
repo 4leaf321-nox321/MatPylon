@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AboutPage } from "./pages/AboutPage";
 import { Dashboard } from "./pages/Dashboard";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -29,13 +29,16 @@ export function App() {
   const status = useStatus();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [wizard, setWizard] = useState<boolean | null>(null);
+  const decided = useRef(false);
 
   useEffect(() => {
     // 마법사는 처음에만 자동으로. 서버가 설정돼 있으면 이전 설치의 설정이 남은 것이므로 건너뛴다.
     // 그 뒤로는 「정보 → 처음 설정 다시 열기」 로 언제든 다시 연다 — 설정을 지우지 않고.
-    if (status === null) return;
+    // 첫 상태가 도착했을 때 한 번만 판정한다: 뒤에 서버를 설정한다고 화면이 튀면 안 된다.
+    if (status === null || decided.current) return;
+    decided.current = true;
     setWizard(!status.serverConfigured && localStorage.getItem(WIZARD_KEY) !== "1");
-  }, [status === null]);
+  }, [status]);
 
   useEffect(() => {
     const open = () => setWizard(true);

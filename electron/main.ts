@@ -69,7 +69,7 @@ function createWindow(): BrowserWindow {
     w.webContents.once("did-finish-load", () => {
       setTimeout(async () => {
         const img = await w.webContents.capturePage();
-        require("node:fs").writeFileSync(shot, img.toPNG());
+        writeFileSync(shot, img.toPNG());
         quitting = true;
         app.quit();
       }, 1500);

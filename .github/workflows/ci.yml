@@ -30,6 +30,7 @@ jobs:
           restore-keys: electron-${{ runner.os }}-
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
       - run: npm run package
       - uses: actions/upload-artifact@v4

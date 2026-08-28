@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Card } from "../ui";
 
 export function LogPage() {
   const [text, setText] = useState("");
-  const load = () => window.matpylon.logTail(300).then(setText);
+  const load = useCallback(() => window.matpylon.logTail(300).then(setText), []);
   useEffect(() => {
     void load();
     const t = setInterval(() => void load(), 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [load]);
   return (
     <Card
       title="로그 (오늘, 마지막 300줄)"
