@@ -7,7 +7,29 @@ export interface EngineStatus {
   running: boolean;
   serverConfigured: boolean;
   nextRunAt: string | null;
+  lastError: string | null;
   counts: { ready: number; sent: number; failed: number };
+}
+
+/** 원장 한 줄 — 이력 화면. 엔진의 FileRow 와 같은 모양이지만 여기서 다시 적는다:
+ * 렌더러가 엔진 타입을 import 하면 경계가 흐려진다. */
+export interface LedgerRow {
+  id: number;
+  source_key: string;
+  path: string;
+  size: number;
+  status: string;
+  attempts: number;
+  last_error: string | null;
+  server_id: string | null;
+  first_seen_at: number;
+  sent_at: number | null;
+}
+
+export interface ConnectionCheck {
+  ok: boolean;
+  user?: string;
+  error?: string;
 }
 
 export interface MatPylonApi {
@@ -15,6 +37,22 @@ export interface MatPylonApi {
   onStatus(listener: (status: EngineStatus) => void): () => void;
   /** 스캔 + 전송을 즉시 한 번. */
   sendNow(): Promise<void>;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
+  /** 설정은 전체를 읽고 전체를 쓴다. 엔진의 Config 와 같은 JSON 모양. */
+  getConfig(): Promise<unknown>;
+  setConfig(config: unknown): Promise<void>;
+  hasToken(): Promise<boolean>;
+  setToken(token: string | null): Promise<void>;
+  /** 저장 전에 URL·토큰으로 /auth/me 를 불러 본다. */
+  testConnection(url: string): Promise<ConnectionCheck>;
+  registerConnector(url: string, name: string, workspaceId: string): Promise<{ id: string }>;
+  listFiles(status?: string): Promise<LedgerRow[]>;
+  requeue(id: number): Promise<void>;
+  /** 폴더 선택 대화상자. 취소하면 null. */
+  pickFolder(): Promise<string | null>;
+  /** 파일명 규칙 미리보기용 — 폴더의 파일 이름 최대 n개. */
+  listFilenames(dir: string, limit: number): Promise<string[]>;
   /** 로그인 시 자동 시작. 레지스트리 Run 키 — 관리자 권한 불필요. */
   getAutoLaunch(): Promise<boolean>;
   setAutoLaunch(enabled: boolean): Promise<void>;
@@ -24,6 +62,18 @@ export const CHANNELS = {
   getStatus: "engine:getStatus",
   status: "engine:status",
   sendNow: "engine:sendNow",
+  pause: "engine:pause",
+  resume: "engine:resume",
+  getConfig: "engine:getConfig",
+  setConfig: "engine:setConfig",
+  hasToken: "engine:hasToken",
+  setToken: "engine:setToken",
+  testConnection: "engine:testConnection",
+  registerConnector: "engine:registerConnector",
+  listFiles: "engine:listFiles",
+  requeue: "engine:requeue",
+  pickFolder: "app:pickFolder",
+  listFilenames: "app:listFilenames",
   getAutoLaunch: "app:getAutoLaunch",
   setAutoLaunch: "app:setAutoLaunch",
 } as const;

@@ -74,6 +74,20 @@ describe("engine", () => {
     engine.close();
   });
 
+  it("halt 는 배치를 멈추고 나머지는 대기로 남긴다", async () => {
+    const transport = fakeTransport({ "A_1.tra": { kind: "halt", error: "401" } });
+    const { engine, write, tick } = build(transport);
+    write("A_1.tra", "a");
+    write("B_2.tra", "b");
+    await engine.scan();
+    tick(3 * MIN);
+    await engine.sendNow();
+    expect(transport.seen).toHaveLength(1);
+    expect(engine.status().counts.ready).toBe(2);
+    expect(engine.status().lastError).toBe("401");
+    engine.close();
+  });
+
   it("옮기기 옵션은 sent 뒤에만, 안 켜면 제자리", async () => {
     const moved = build(fakeTransport({}), "sent");
     const f = moved.write("A_1.tra", "a");

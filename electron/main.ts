@@ -1,8 +1,12 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
 import log from "electron-log/main";
+import { readdirSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Engine } from "@engine/index";
+import { parseConfig } from "@engine/config";
 import { CHANNELS } from "@shared/ipc";
+import { fileSecrets } from "./secrets";
 
 // 인스턴스 하나. 트레이 앱이 둘 뜨면 같은 폴더를 두 번 보낸다.
 if (!app.requestSingleInstanceLock()) {
@@ -16,11 +20,8 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 
-const engine = new Engine({
-  appVersion: app.getVersion(),
-  dataDir: app.getPath("userData"),
-  log: (msg) => log.info(msg),
-});
+// safeStorage 는 app ready 뒤에만 쓸 수 있다 — 엔진은 ready 안에서 만든다.
+let engine!: Engine;
 
 function createWindow(): BrowserWindow {
   const w = new BrowserWindow({
@@ -96,6 +97,12 @@ function buildTrayMenu(): void {
 }
 
 app.whenReady().then(() => {
+  engine = new Engine({
+    appVersion: app.getVersion(),
+    dataDir: app.getPath("userData"),
+    secrets: fileSecrets(app.getPath("userData")),
+    log: (msg) => log.info(msg),
+  });
   tray = new Tray(trayIcon());
   tray.on("double-click", showWindow);
   buildTrayMenu();
@@ -107,6 +114,42 @@ app.whenReady().then(() => {
 
   ipcMain.handle(CHANNELS.getStatus, () => engine.status());
   ipcMain.handle(CHANNELS.sendNow, () => engine.sendNow());
+  ipcMain.handle(CHANNELS.pause, () => engine.stop());
+  ipcMain.handle(CHANNELS.resume, () => engine.start());
+  ipcMain.handle(CHANNELS.getConfig, () => engine.getConfig());
+  ipcMain.handle(CHANNELS.setConfig, (_e, config: unknown) => engine.setConfig(parseConfig(config)));
+  ipcMain.handle(CHANNELS.hasToken, () => engine.secrets.getToken() !== null);
+  ipcMain.handle(CHANNELS.setToken, (_e, token: string | null) => engine.setToken(token));
+  ipcMain.handle(CHANNELS.testConnection, async (_e, url: string) => {
+    try {
+      const me = await engine.client(url, null).me();
+      return { ok: true, user: me.display_name ?? me.email ?? me.id };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
+  ipcMain.handle(CHANNELS.registerConnector, async (_e, url: string, name: string, ws: string) => {
+    const out = await engine.client(url, null).registerConnector(name, os.hostname(), ws);
+    return { id: out.id };
+  });
+  ipcMain.handle(CHANNELS.listFiles, (_e, status?: string) =>
+    engine.files(status as Parameters<Engine["files"]>[0]),
+  );
+  ipcMain.handle(CHANNELS.requeue, (_e, id: number) => engine.requeue(id));
+  ipcMain.handle(CHANNELS.pickFolder, async () => {
+    const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  ipcMain.handle(CHANNELS.listFilenames, (_e, dir: string, limit: number) => {
+    try {
+      return readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isFile())
+        .map((d) => d.name)
+        .slice(0, limit);
+    } catch {
+      return [];
+    }
+  });
   ipcMain.handle(CHANNELS.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin);
   ipcMain.handle(CHANNELS.setAutoLaunch, (_e, enabled: boolean) => {
     app.setLoginItemSettings({ openAtLogin: enabled });
@@ -122,5 +165,5 @@ app.on("second-instance", showWindow);
 app.on("window-all-closed", () => {});
 app.on("before-quit", () => {
   quitting = true;
-  engine.close();
+  engine?.close();
 });

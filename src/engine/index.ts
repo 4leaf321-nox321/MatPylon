@@ -18,12 +18,17 @@ import { extractHints } from "./hints";
 import { Ledger, type FileRow } from "./ledger";
 import { scanSource } from "./scanner";
 import { nextRunAt } from "./scheduler";
+import { MatNexusClient } from "./matnexus";
+import { memorySecrets, type SecretStore } from "./secrets";
 import { noTransport, type Transport } from "./transport";
 
 export interface EngineOptions {
   appVersion: string;
   /** 설정·원장·로그가 사는 곳(`%APPDATA%\MatPylon`). 엔진은 이 경로를 받기만 한다. */
   dataDir: string;
+  /** PAT 보관. Electron 은 safeStorage 로, 테스트는 메모리로. */
+  secrets?: SecretStore;
+  /** 테스트용 — 주면 설정과 무관하게 이것으로 보낸다. */
   transport?: Transport;
   now?: () => number;
   log?: (msg: string) => void;
@@ -34,12 +39,14 @@ export class Engine extends EventEmitter {
   private busy = false;
   private config: Config;
   private readonly ledger: Ledger;
-  private readonly transport: Transport;
+  private transport: Transport;
+  readonly secrets: SecretStore;
   private readonly now: () => number;
   private readonly log: (msg: string) => void;
   private scanTimer: NodeJS.Timeout | null = null;
   private sendTimer: NodeJS.Timeout | null = null;
   private lastSendAt: number | null = null;
+  private lastError: string | null = null;
   private nextSendAt: number | null = null;
 
   constructor(private readonly options: EngineOptions) {
@@ -47,8 +54,9 @@ export class Engine extends EventEmitter {
     mkdirSync(options.dataDir, { recursive: true });
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => {});
-    this.transport = options.transport ?? noTransport;
+    this.secrets = options.secrets ?? memorySecrets();
     this.config = loadConfig(options.dataDir);
+    this.transport = options.transport ?? this.buildTransport();
     this.ledger = new Ledger(path.join(options.dataDir, "ledger.sqlite"));
     const recovered = this.ledger.recoverSending();
     if (recovered) this.log(`지난 실행에서 보내다 만 ${recovered}건을 다시 대기로`);
@@ -61,8 +69,28 @@ export class Engine extends EventEmitter {
   setConfig(config: Config): void {
     saveConfig(this.options.dataDir, config);
     this.config = config;
+    if (!this.options.transport) this.transport = this.buildTransport();
     if (this.running) this.arm();
     this.emitStatus();
+  }
+
+  setToken(token: string | null): void {
+    this.secrets.setToken(token);
+    this.emitStatus();
+  }
+
+  /** 설정에서 클라이언트를 만든다. 서버 URL 이 없으면 보내지 않는 transport. */
+  private buildTransport(): Transport {
+    const { url, connectorId } = this.config.server;
+    if (!url) return noTransport;
+    return new MatNexusClient({ baseUrl: url, secrets: this.secrets, connectorId });
+  }
+
+  /** 화면의 「연결 확인」·커넥터 등록이 쓴다. 설정과 무관한 URL 로도 부를 수 있어야
+   * 마법사에서 저장 전에 확인한다. */
+  client(url = this.config.server.url, connectorId = this.config.server.connectorId): MatNexusClient {
+    if (!url) throw new Error("서버 URL 이 없습니다");
+    return new MatNexusClient({ baseUrl: url, secrets: this.secrets, connectorId });
   }
 
   start(): void {
@@ -124,7 +152,11 @@ export class Engine extends EventEmitter {
         this.log("서버가 설정되지 않아 보내지 않습니다");
         return;
       }
-      for (const row of this.ledger.due(this.now())) await this.deliverOne(row);
+      for (const row of this.ledger.due(this.now())) {
+        const halted = await this.deliverOne(row);
+        if (halted) break;
+      }
+      await this.heartbeat();
     } finally {
       this.busy = false;
       if (this.running) this.arm();
@@ -137,11 +169,12 @@ export class Engine extends EventEmitter {
     await this.send();
   }
 
-  private async deliverOne(row: FileRow): Promise<void> {
+  /** true 면 배치를 멈춘다(halt). */
+  private async deliverOne(row: FileRow): Promise<boolean> {
     const source = this.config.sources.find((s) => s.key === row.source_key);
     if (!source) {
       this.ledger.markFailed(row.id, "설정에 없는 소스입니다");
-      return;
+      return false;
     }
     this.ledger.claim(row.id);
     const result = await this.transport.deliver({
@@ -165,6 +198,39 @@ export class Engine extends EventEmitter {
         this.ledger.markRetry(row.id, result.error, this.now());
         this.log(`나중에 다시: ${row.path} — ${result.error}`);
         break;
+      case "halt":
+        this.ledger.markRetry(row.id, result.error, this.now());
+        this.lastError = result.error;
+        this.log(`전송 중단: ${result.error}`);
+        return true;
+    }
+    return false;
+  }
+
+  /** 상태 보고. 실패해도 전송과 무관하다 — 로그만 남긴다. */
+  private async heartbeat(): Promise<void> {
+    if (!(this.transport instanceof MatNexusClient) || !this.transport.configured()) return;
+    const files = this.ledger.list(undefined, 10_000);
+    const sources = this.config.sources.map((s) => {
+      const mine = files.filter((f) => f.source_key === s.key);
+      const lastSent = mine.filter((f) => f.sent_at).map((f) => f.sent_at!).sort().at(-1);
+      return {
+        key: s.key,
+        pending: mine.filter((f) => f.status === "ready" || f.status === "retry").length,
+        failed: mine.filter((f) => f.status === "failed").length,
+        last_sent_at: lastSent ? new Date(lastSent).toISOString() : null,
+      };
+    });
+    try {
+      await this.transport.heartbeat({
+        app_version: this.options.appVersion,
+        sources,
+        next_run_at: this.nextSendAt ? new Date(this.nextSendAt).toISOString() : null,
+      });
+      this.lastError = null;
+    } catch (e) {
+      this.lastError = `heartbeat 실패: ${(e as Error).message}`;
+      this.log(this.lastError);
     }
   }
 
@@ -199,6 +265,7 @@ export class Engine extends EventEmitter {
       appVersion: this.options.appVersion,
       running: this.running,
       serverConfigured: this.transport.configured(),
+      lastError: this.lastError,
       nextRunAt: this.running && this.nextSendAt ? new Date(this.nextSendAt).toISOString() : null,
       counts: { ready: c.ready + c.retry, sent: c.sent, failed: c.failed },
     };

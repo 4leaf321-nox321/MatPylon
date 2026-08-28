@@ -1,6 +1,6 @@
-/** 전송 인터페이스. P1 은 여기까지 — 구현은 P2(MatNexus API 클라이언트).
+/** 전송 인터페이스. 구현은 `matnexus.ts`.
  *
- * 결과를 셋으로 가른다. 원장의 상태 기계가 그것만 안다. */
+ * 결과를 넷으로 가른다. 원장의 상태 기계가 그것만 안다. */
 
 import type { Hints } from "./hints";
 
@@ -17,7 +17,9 @@ export type DeliveryResult =
   /** 4xx — 다시 보내도 같다. 사람이 본다. */
   | { kind: "rejected"; error: string }
   /** 5xx·네트워크 — 백오프 후 다시. */
-  | { kind: "retry"; error: string };
+  | { kind: "retry"; error: string }
+  /** 401 등 — 이 건만이 아니라 배치 전체를 멈춘다. 파일은 대기로 남는다. */
+  | { kind: "halt"; error: string };
 
 export interface Transport {
   configured(): boolean;
@@ -27,5 +29,5 @@ export interface Transport {
 /** 서버가 없을 때. 보내지 않고 대기로 둔다. */
 export const noTransport: Transport = {
   configured: () => false,
-  deliver: async () => ({ kind: "retry", error: "서버가 설정되지 않았습니다" }),
+  deliver: async () => ({ kind: "halt", error: "서버가 설정되지 않았습니다" }),
 };
