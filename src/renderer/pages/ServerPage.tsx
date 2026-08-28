@@ -22,6 +22,8 @@ export function ServerForm({
   const [workspaceId, setWorkspaceId] = useState("");
   /** 연결 확인이 되면 채운다. null 이면 아직 안 물어봤거나 실패 — 그때는 ID 를 손으로 받는다. */
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[] | null>(null);
+  /** null = 서버 미연결·구버전 → 토글 숨김. */
+  const [autoRegister, setAutoRegister] = useState<boolean | null>(null);
   const [tls, setTls] = useState(config.server.tls);
   const [check, setCheck] = useState<{ ok: boolean; text: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -29,7 +31,8 @@ export function ServerForm({
 
   useEffect(() => {
     void window.matpylon.hasToken().then(setHasToken);
-  }, []);
+    if (config.server.connectorId) void window.matpylon.getAutoRegister().then(setAutoRegister);
+  }, [config.server.connectorId]);
 
   const saveToken = async () => {
     if (!token.trim()) return;
@@ -161,9 +164,42 @@ export function ServerForm({
             <Input value={connectorName} onChange={(e) => setConnectorName(e.target.value)} />
           </Field>
           {config.server.connectorId ? (
-            <p className="text-sm">
-              등록됨 <span className="font-mono text-xs text-slate-500">{config.server.connectorId}</span>
-            </p>
+            <div className="space-y-2">
+              <p className="text-sm">
+                등록됨 <span className="font-mono text-xs text-slate-500">{config.server.connectorId}</span>
+              </p>
+              {autoRegister !== null && (
+                <div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={autoRegister}
+                      onChange={async (e) => {
+                        const next = e.target.checked;
+                        if (
+                          next &&
+                          !confirm(
+                            "후보가 하나로 좁혀지면 승인 없이 바로 시험이 만들어집니다.\n" +
+                              "파일명 규칙이 틀리게 맞으면 엉뚱한 시편에 붙을 수 있습니다.\n" +
+                              "「MatNexus 대조」 열이 한동안 전부 맞는 것을 확인한 뒤 켜세요. 켤까요?",
+                          )
+                        )
+                          return;
+                        try {
+                          setAutoRegister(await window.matpylon.setAutoRegister(next));
+                        } catch (err) {
+                          setMsg((err as Error).message.replace(/^.*Error: /, ""));
+                        }
+                      }}
+                    />
+                    후보가 하나면 승인 없이 자동 등록
+                  </label>
+                  <p className="ml-6 text-xs text-slate-500">
+                    꺼져 있으면(기본) 승인 대기로 올라가고, MatNexus 수집함에서 「승인」 한 번으로 등록됩니다.
+                  </p>
+                </div>
+              )}
+            </div>
           ) : (
             <>
               {workspaces && workspaces.length > 0 ? (

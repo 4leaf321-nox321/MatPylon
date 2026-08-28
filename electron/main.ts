@@ -173,20 +173,23 @@ app.whenReady().then(() => {
     return list.map((w) => ({ id: w.id, name: w.name, path: w.path, is_active: w.is_active }));
   });
   // 규칙 편집기의 대조·참조. 서버가 없거나 저쪽에 아직 엔드포인트가 없으면 null — 화면은 힌트만 보인다.
-  const workspaceOf = async () => {
+  const myConnector = async () => {
     const c = engine.getConfig();
     if (!c.server.url || !c.server.connectorId || !engine.secrets.getToken()) return null;
     const mine = await engine.client().listConnectors();
-    return mine.find((x) => x.id === c.server.connectorId)?.workspace_id ?? null;
+    return mine.find((x) => x.id === c.server.connectorId) ?? null;
   };
+  const workspaceOf = async () => (await myConnector())?.workspace_id ?? null;
   ipcMain.handle(CHANNELS.resolveHints, async (_e, hints: Record<string, string>[]) => {
     try {
-      const ws = await workspaceOf();
-      if (!ws) return null;
-      const results = await engine.client().resolve(ws, hints);
+      const conn = await myConnector();
+      if (!conn) return null;
+      // 판정(unique)과 승인은 별개다 — 문구만 커넥터 설정을 따른다(요청서 3).
+      const uniqueLabel = conn.auto_register ? "자동 등록" : "승인 대기(후보 1)";
+      const results = await engine.client().resolve(conn.workspace_id, hints);
       return results.map((r) => ({
         outcome: r.outcome,
-        label: r.outcome === "unique" ? "자동 등록" : r.outcome === "multiple" ? `후보 ${r.candidates.length}개` : "수집함행",
+        label: r.outcome === "unique" ? uniqueLabel : r.outcome === "multiple" ? `후보 ${r.candidates.length}개` : "수집함행",
         detail:
           r.outcome === "unique"
             ? (r.candidate?.specimen_name ?? "")
@@ -219,6 +222,20 @@ app.whenReady().then(() => {
       log.warn("reference 실패: %s", (e as Error).message);
       return null;
     }
+  });
+  ipcMain.handle(CHANNELS.getAutoRegister, async () => {
+    try {
+      const conn = await myConnector();
+      return conn && typeof conn.auto_register === "boolean" ? conn.auto_register : null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle(CHANNELS.setAutoRegister, async (_e, enabled: boolean) => {
+    const conn = await myConnector();
+    if (!conn) throw new Error("커넥터가 등록돼 있지 않습니다");
+    const out = await engine.client().updateConnector(conn.id, { auto_register: enabled });
+    return out.auto_register === true;
   });
   ipcMain.handle(CHANNELS.listFiles, (_e, status?: string) =>
     engine.files(status as Parameters<Engine["files"]>[0]),

@@ -322,6 +322,24 @@ paths:
       responses:
         "204": { description: 버렸다. 원본은 보존 기간까지 남는다 }
 
+  /pipelines/inbox/{item_id}/approve:
+    post:
+      summary: suggested 한 건 승인 (MatNexus 화면용 — 에이전트는 안 부른다)
+      description: candidates[0] 으로 등록. assign 으로도 같은 일이 되지만 화면의 「승인」 단추가 이걸 쓴다.
+      tags: [inbox]
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      responses:
+        "200":
+          description: 등록된 항목
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxItemDetail" }
+        "409":
+          description: suggested 상태가 아님 `MNX-PIPE-0007`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /pipelines/inbox/approve:
     post:
       summary: suggested 여럿을 한꺼번에 승인 (요청서 3)
@@ -423,7 +441,10 @@ components:
         auto_register:
           type: boolean
           default: false
-          description: 후보가 하나로 좁혀지면 승인 없이 등록할지. 기본은 승인 대기(요청서 3)
+          description: |
+            후보가 하나로 좁혀지면 승인 없이 등록할지. 기본은 승인 대기(요청서 3).
+            **재등록(같은 hostname)은 이 값을 안 뒤집는다** — 재설치가 안전 스위치를 말없이
+            바꾸면 안 된다(v1.148.0 결정). 바꾸는 길은 PATCH 뿐이다
       required: [name, hostname, workspace_id]
 
     ConnectorOut:

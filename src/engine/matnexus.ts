@@ -26,6 +26,8 @@ export interface ConnectorOut {
   name: string;
   hostname: string;
   workspace_id: string;
+  /** false 면 후보 1개도 suggested 로 승인 대기(요청서 3). 구버전 서버엔 없다. */
+  auto_register?: boolean;
 }
 
 export interface WorkspaceOut {
@@ -198,6 +200,11 @@ export class MatNexusClient implements Transport {
 
   listConnectors(): Promise<ConnectorOut[]> {
     return this.request("GET", "/pipelines/connectors");
+  }
+
+  /** 재등록(POST)은 auto_register 를 안 뒤집는다 — 바꾸는 길은 이것뿐(v1.148.0 결정). */
+  updateConnector(id: string, patch: { name?: string; auto_register?: boolean }): Promise<ConnectorOut> {
+    return this.request("PATCH", `/pipelines/connectors/${id}`, JSON.stringify(patch));
   }
 
   heartbeat(body: HeartbeatIn): Promise<HeartbeatOut> {

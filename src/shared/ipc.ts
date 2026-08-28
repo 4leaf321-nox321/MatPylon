@@ -73,6 +73,9 @@ export interface MatPylonApi {
   listWorkspaces(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<WorkspaceItem[]>;
   /** 저장된 서버 설정으로. 서버가 없거나 엔드포인트가 없으면(404) null. */
   resolveHints(hints: Record<string, string>[]): Promise<ResolveItem[] | null>;
+  /** 이 PC 커넥터의 자동 등록 설정. null = 서버 미연결이거나 구버전(칸 없음) → 토글 숨김. */
+  getAutoRegister(): Promise<boolean | null>;
+  setAutoRegister(enabled: boolean): Promise<boolean>;
   reference(): Promise<ReferenceMaterial[] | null>;
   listFiles(status?: string): Promise<LedgerRow[]>;
   requeue(id: number): Promise<void>;
@@ -109,6 +112,8 @@ export const CHANNELS = {
   registerConnector: "engine:registerConnector",
   listWorkspaces: "engine:listWorkspaces",
   resolveHints: "engine:resolveHints",
+  getAutoRegister: "engine:getAutoRegister",
+  setAutoRegister: "engine:setAutoRegister",
   reference: "engine:reference",
   listFiles: "engine:listFiles",
   requeue: "engine:requeue",
