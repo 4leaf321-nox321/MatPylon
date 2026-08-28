@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { OPEN_WIZARD_EVENT } from "../App";
 import { useConfig, useStatus } from "../hooks";
 import { Button, Card, Toggle } from "../ui";
 
@@ -33,6 +34,10 @@ export function AboutPage() {
       </Card>
 
       <Card title="시작">
+        <div className="mb-3">
+          <Button onClick={() => window.dispatchEvent(new Event(OPEN_WIZARD_EVENT))}>처음 설정 다시 열기</Button>
+          <span className="ml-2 text-xs text-slate-500">서버·소스·주기를 순서대로 다시 봅니다. 지금 설정은 그대로입니다.</span>
+        </div>
         <Toggle
           checked={autoLaunch ?? false}
           onChange={async (v) => {

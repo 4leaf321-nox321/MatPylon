@@ -22,6 +22,8 @@ const TABS = [
 type Tab = (typeof TABS)[number][0];
 
 const WIZARD_KEY = "matpylon.wizardDone";
+/** 「정보」 탭이 마법사를 다시 열 때 쏘는 이벤트. 설정은 그대로 두고 화면만 바꾼다. */
+export const OPEN_WIZARD_EVENT = "matpylon:open-wizard";
 
 export function App() {
   const status = useStatus();
@@ -29,10 +31,17 @@ export function App() {
   const [wizard, setWizard] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // 마법사는 한 번만. 서버가 설정돼 있으면 이전 설치의 설정이 남은 것이므로 건너뛴다.
+    // 마법사는 처음에만 자동으로. 서버가 설정돼 있으면 이전 설치의 설정이 남은 것이므로 건너뛴다.
+    // 그 뒤로는 「정보 → 처음 설정 다시 열기」 로 언제든 다시 연다 — 설정을 지우지 않고.
     if (status === null) return;
     setWizard(!status.serverConfigured && localStorage.getItem(WIZARD_KEY) !== "1");
   }, [status === null]);
+
+  useEffect(() => {
+    const open = () => setWizard(true);
+    window.addEventListener(OPEN_WIZARD_EVENT, open);
+    return () => window.removeEventListener(OPEN_WIZARD_EVENT, open);
+  }, []);
 
   if (wizard === null) return null;
   if (wizard)
