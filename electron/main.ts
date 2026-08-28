@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
 import log from "electron-log/main";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -29,9 +29,13 @@ let quitting = false;
 let engine!: Engine;
 
 function createWindow(): BrowserWindow {
+  // 마법사 첫 화면이 스크롤 없이 들어가는 크기. 화면이 더 작으면 작업 영역에 맞춘다.
+  const area = screen.getPrimaryDisplay().workAreaSize;
   const w = new BrowserWindow({
-    width: 1000,
-    height: 700,
+    width: Math.min(1120, area.width),
+    height: Math.min(980, area.height),
+    minWidth: 900,
+    minHeight: 640,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -163,6 +167,10 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.registerConnector, async (_e, url: string, name: string, ws: string) => {
     const out = await engine.client(url, null).registerConnector(name, os.hostname(), ws);
     return { id: out.id };
+  });
+  ipcMain.handle(CHANNELS.listWorkspaces, async (_e, url: string, tls?: { insecure: boolean; caFile: string | null }) => {
+    const list = await engine.client(url, null, tls).listWorkspaces();
+    return list.map((w) => ({ id: w.id, name: w.name, path: w.path, is_active: w.is_active }));
   });
   ipcMain.handle(CHANNELS.listFiles, (_e, status?: string) =>
     engine.files(status as Parameters<Engine["files"]>[0]),

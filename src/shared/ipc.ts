@@ -26,6 +26,13 @@ export interface LedgerRow {
   sent_at: number | null;
 }
 
+export interface WorkspaceItem {
+  id: string;
+  name: string;
+  path: string;
+  is_active: boolean;
+}
+
 export interface ConnectionCheck {
   ok: boolean;
   user?: string;
@@ -47,6 +54,8 @@ export interface MatPylonApi {
   /** 저장 전에 URL·토큰으로 /auth/me 를 불러 본다. */
   testConnection(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<ConnectionCheck>;
   registerConnector(url: string, name: string, workspaceId: string): Promise<{ id: string }>;
+  /** 토큰 주인이 속한 부서 목록. 연결 확인 뒤 마법사가 고르게 한다. */
+  listWorkspaces(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<WorkspaceItem[]>;
   listFiles(status?: string): Promise<LedgerRow[]>;
   requeue(id: number): Promise<void>;
   /** 폴더 선택 대화상자. 취소하면 null. */
@@ -80,6 +89,7 @@ export const CHANNELS = {
   setToken: "engine:setToken",
   testConnection: "engine:testConnection",
   registerConnector: "engine:registerConnector",
+  listWorkspaces: "engine:listWorkspaces",
   listFiles: "engine:listFiles",
   requeue: "engine:requeue",
   pickFolder: "app:pickFolder",

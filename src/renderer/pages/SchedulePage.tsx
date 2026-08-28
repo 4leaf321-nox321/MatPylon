@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Config, Schedule } from "@engine/config";
 import { nextRunAt } from "@engine/scheduler";
 import { useConfig } from "../hooks";
@@ -18,11 +18,25 @@ function presetIndex(s: Schedule) {
   return s.kind === "daily" ? 4 : -1;
 }
 
-export function ScheduleForm({ config, onSaved }: { config: Config; onSaved: (c: Config) => Promise<string | null> }) {
+export function ScheduleForm({
+  config,
+  onSaved,
+  footer,
+}: {
+  config: Config;
+  onSaved: (c: Config) => Promise<string | null>;
+  /** 마법사처럼 저장 버튼을 풋터에 두고 싶을 때. */
+  footer?: (ctx: { save: () => Promise<boolean> }) => ReactNode;
+}) {
   const [schedule, setSchedule] = useState<Schedule>(config.schedule);
   const [scanMinutes, setScanMinutes] = useState(config.scanMinutes);
   const [msg, setMsg] = useState<string | null>(null);
   const idx = presetIndex(schedule);
+  const persist = async (): Promise<boolean> => {
+    const err = await onSaved({ ...config, schedule, scanMinutes });
+    setMsg(err ?? "저장했습니다");
+    return err === null;
+  };
 
   return (
     <div className="space-y-4">
@@ -69,18 +83,16 @@ export function ScheduleForm({ config, onSaved }: { config: Config; onSaved: (c:
           이 설정이면 다음 전송은 <b>{fmtTime(nextRunAt(schedule, null, Date.now()))}</b> 쯤입니다.
         </p>
       </Card>
-      <div className="flex items-center gap-3">
-        <Button
-          variant="primary"
-          onClick={async () => {
-            const err = await onSaved({ ...config, schedule, scanMinutes });
-            setMsg(err ?? "저장했습니다");
-          }}
-        >
-          저장
-        </Button>
-        {msg && <span className="text-sm text-slate-600">{msg}</span>}
-      </div>
+      {msg && <p className="text-sm text-slate-600">{msg}</p>}
+      {footer ? (
+        footer({ save: persist })
+      ) : (
+        <div className="flex items-center gap-3">
+          <Button variant="primary" onClick={() => void persist()}>
+            저장
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,15 @@ export interface ConnectorOut {
   workspace_id: string;
 }
 
+export interface WorkspaceOut {
+  id: string;
+  name: string;
+  /** 계층 경로(`본부/팀`). 이름이 같은 팀이 다른 본부에 있을 수 있어 함께 보여 준다. */
+  path: string;
+  kind: string;
+  is_active: boolean;
+}
+
 export interface HeartbeatIn {
   app_version: string;
   sources: { key: string; pending: number; failed: number; last_sent_at: string | null }[];
@@ -123,6 +132,11 @@ export class MatNexusClient implements Transport {
 
   me(): Promise<Me> {
     return this.request("GET", "/auth/me");
+  }
+
+  /** PAT 주인이 속한 부서. 마법사가 부서 ID 를 손으로 베끼지 않게 목록에서 고른다. */
+  listWorkspaces(): Promise<WorkspaceOut[]> {
+    return this.request("GET", "/workspaces");
   }
 
   registerConnector(name: string, hostname: string, workspaceId: string): Promise<ConnectorOut> {

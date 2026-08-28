@@ -1,21 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Config } from "@engine/config";
+import type { WorkspaceItem } from "@shared/ipc";
 import { useConfig } from "../hooks";
-import { Badge, Button, Card, Field, Input } from "../ui";
+import { Badge, Button, Card, Field, Input, Select } from "../ui";
 
 /** 서버 URL · PAT · 커넥터. 마법사도 이 폼을 그대로 쓴다. */
 export function ServerForm({
   config,
   onSaved,
+  footer,
 }: {
   config: Config;
   onSaved: (next: Config) => Promise<string | null>;
+  /** 마법사처럼 저장 버튼을 풋터에 두고 싶을 때. 주면 기본 저장 줄을 그리지 않는다. */
+  footer?: (ctx: { save: () => Promise<boolean> }) => ReactNode;
 }) {
   const [url, setUrl] = useState(config.server.url ?? "");
   const [token, setToken] = useState("");
   const [hasToken, setHasToken] = useState(false);
   const [connectorName, setConnectorName] = useState(config.server.connectorName || defaultConnectorName());
   const [workspaceId, setWorkspaceId] = useState("");
+  /** 연결 확인이 되면 채운다. null 이면 아직 안 물어봤거나 실패 — 그때는 ID 를 손으로 받는다. */
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[] | null>(null);
   const [tls, setTls] = useState(config.server.tls);
   const [check, setCheck] = useState<{ ok: boolean; text: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -39,12 +45,22 @@ export function ServerForm({
       if (token.trim()) await saveToken();
       const r = await window.matpylon.testConnection(url.trim(), tls);
       setCheck(r.ok ? { ok: true, text: `연결됨 — ${r.user}` } : { ok: false, text: r.error ?? "실패" });
+      if (r.ok) {
+        try {
+          const list = (await window.matpylon.listWorkspaces(url.trim(), tls)).filter((w) => w.is_active);
+          setWorkspaces(list);
+          if (!workspaceId && list.length === 1) setWorkspaceId(list[0]!.id);
+        } catch {
+          setWorkspaces(null);
+        }
+      }
     } finally {
       setBusy(false);
     }
   };
 
-  const save = async () => {
+  /** 성공하면 true. */
+  const save = async (): Promise<boolean> => {
     setMsg(null);
     if (token.trim()) await saveToken();
     const err = await onSaved({
@@ -52,6 +68,7 @@ export function ServerForm({
       server: { ...config.server, url: url.trim() || null, connectorName, tls },
     });
     setMsg(err ?? "저장했습니다");
+    return err === null;
   };
 
   const register = async () => {
@@ -149,9 +166,29 @@ export function ServerForm({
             </p>
           ) : (
             <>
-              <Field label="부서(워크스페이스) ID" hint="MatNexus 관리 화면의 부서 정보에서 복사">
-                <Input value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} />
-              </Field>
+              {workspaces && workspaces.length > 0 ? (
+                <Field label="부서" hint="토큰 주인이 속한 부서. 이 부서로 파일이 들어갑니다">
+                  <Select className="w-full" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
+                    <option value="">— 선택 —</option>
+                    {workspaces.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.path && w.path !== w.name ? `${w.path}` : w.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              ) : (
+                <Field
+                  label="부서(워크스페이스) ID"
+                  hint={
+                    workspaces && workspaces.length === 0
+                      ? "이 토큰의 주인은 속한 부서가 없습니다. MatNexus 에서 부서에 넣어 주세요"
+                      : "위에서 「연결 확인」을 누르면 부서 목록에서 고를 수 있습니다"
+                  }
+                >
+                  <Input value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} />
+                </Field>
+              )}
               <Button
                 variant="primary"
                 disabled={busy || !url.trim() || !hasToken || !workspaceId.trim() || !connectorName.trim()}
@@ -164,12 +201,16 @@ export function ServerForm({
         </div>
       </Card>
 
-      <div className="flex items-center gap-3">
-        <Button variant="primary" onClick={save}>
-          저장
-        </Button>
-        {msg && <span className="text-sm text-slate-600">{msg}</span>}
-      </div>
+      {msg && <p className="text-sm text-slate-600">{msg}</p>}
+      {footer ? (
+        footer({ save })
+      ) : (
+        <div className="flex items-center gap-3">
+          <Button variant="primary" onClick={() => void save()}>
+            저장
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

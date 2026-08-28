@@ -52,7 +52,27 @@ export function Wizard({ onDone }: { onDone: () => void }) {
       </Card>
 
       <div className="flex-1">
-        {step === 0 && <ServerForm config={config} onSaved={save} />}
+        {step === 0 && (
+          <ServerForm
+            config={config}
+            onSaved={save}
+            footer={({ save: saveServer }) => (
+              <Footer step={step} onPrev={() => go(-1)}>
+                <Button variant="ghost" onClick={() => go(1)}>
+                  서버는 나중에
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={async () => {
+                    if (await saveServer()) go(1);
+                  }}
+                >
+                  저장하고 다음
+                </Button>
+              </Footer>
+            )}
+          />
+        )}
         {step === 1 && (
           <SourceEditor
             source={{
@@ -83,26 +103,25 @@ export function Wizard({ onDone }: { onDone: () => void }) {
             )}
           />
         )}
-        {step === 2 && <ScheduleForm config={config} onSaved={save} />}
+        {step === 2 && (
+          <ScheduleForm
+            config={config}
+            onSaved={save}
+            footer={({ save: saveSchedule }) => (
+              <Footer step={step} onPrev={() => go(1)}>
+                <Button
+                  variant="primary"
+                  onClick={async () => {
+                    if (await saveSchedule()) onDone();
+                  }}
+                >
+                  저장하고 완료
+                </Button>
+              </Footer>
+            )}
+          />
+        )}
       </div>
-
-      {step === 0 && (
-        <Footer step={step} onPrev={() => go(-1)}>
-          <Button variant="ghost" onClick={() => go(1)}>
-            서버는 나중에
-          </Button>
-          <Button variant="primary" onClick={() => go(1)}>
-            다음
-          </Button>
-        </Footer>
-      )}
-      {step === 2 && (
-        <Footer step={step} onPrev={() => go(1)}>
-          <Button variant="primary" onClick={onDone}>
-            완료
-          </Button>
-        </Footer>
-      )}
     </div>
   );
 }

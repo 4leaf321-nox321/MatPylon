@@ -17,6 +17,7 @@ const api: MatPylonApi = {
   setToken: (token) => ipcRenderer.invoke(CHANNELS.setToken, token),
   testConnection: (url, tls) => ipcRenderer.invoke(CHANNELS.testConnection, url, tls),
   registerConnector: (url, name, ws) => ipcRenderer.invoke(CHANNELS.registerConnector, url, name, ws),
+  listWorkspaces: (url, tls) => ipcRenderer.invoke(CHANNELS.listWorkspaces, url, tls),
   listFiles: (status) => ipcRenderer.invoke(CHANNELS.listFiles, status),
   requeue: (id) => ipcRenderer.invoke(CHANNELS.requeue, id),
   pickFolder: () => ipcRenderer.invoke(CHANNELS.pickFolder),
