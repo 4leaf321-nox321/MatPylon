@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Config, Source } from "@engine/config";
 import { HINT_KEYS } from "@shared/hint-keys";
 import { checkRule, extractHints } from "@engine/hints";
@@ -128,6 +128,7 @@ export function SourceEditor({
   error,
   onSave,
   onCancel,
+  footer,
 }: {
   source: Source;
   isNew: boolean;
@@ -135,6 +136,8 @@ export function SourceEditor({
   error: string | null;
   onSave: (s: Source) => void;
   onCancel: () => void;
+  /** 마법사처럼 버튼을 바깥(풋터)에 두고 싶을 때. 주면 기본 버튼 줄을 그리지 않는다. */
+  footer?: (ctx: { submit: () => void; canSubmit: boolean }) => ReactNode;
 }) {
   const [s, setS] = useState<Source>(source);
   const [ext, setExt] = useState(source.extensions.join(" "));
@@ -153,6 +156,7 @@ export function SourceEditor({
     [names, rule],
   );
   const keyTaken = existingKeys.includes(s.key);
+  const canSubmit = Boolean(s.name && s.key && s.path) && !keyTaken;
 
   const submit = () =>
     onSave({
@@ -265,13 +269,17 @@ export function SourceEditor({
         )}
       </Card>
 
-      <div className="flex items-center gap-3">
-        <Button variant="primary" disabled={!s.name || !s.key || !s.path || keyTaken} onClick={submit}>
-          저장
-        </Button>
-        <Button onClick={onCancel}>취소</Button>
-        {error && <span className="text-sm text-red-700">{error}</span>}
-      </div>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      {footer ? (
+        footer({ submit, canSubmit })
+      ) : (
+        <div className="flex items-center gap-3">
+          <Button variant="primary" disabled={!canSubmit} onClick={submit}>
+            저장
+          </Button>
+          <Button onClick={onCancel}>취소</Button>
+        </div>
+      )}
     </div>
   );
 }

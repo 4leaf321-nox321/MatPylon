@@ -8,6 +8,11 @@ import { configPath, parseConfig } from "@engine/config";
 import { CHANNELS } from "@shared/ipc";
 import { fileSecrets } from "./secrets";
 
+// 개발용: `--data-dir=경로` 로 설정·원장·잠금을 다른 곳에 둔다. 설치된 앱이 떠 있는
+// 채로 개발 빌드를 띄워 보려면 이것이 필요하다 — 잠금이 userData 에 걸린다.
+const dataDirArg = process.argv.find((a) => a.startsWith("--data-dir="))?.slice("--data-dir=".length);
+if (dataDirArg) app.setPath("userData", dataDirArg);
+
 // 인스턴스 하나. 트레이 앱이 둘 뜨면 같은 폴더를 두 번 보낸다.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
