@@ -191,8 +191,9 @@ paths:
         - name: connector_id
           in: query
           schema: { type: string, format: uuid }
-        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
-        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        # MatNexus 규약은 limit·offset 이다(`shared/pagination.Page`). 처음 계획의 page·size 를 고쳤다.
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
         "200":
           description: 페이지 (기존 `shared/pagination.Page`)
@@ -205,8 +206,8 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/InboxItemOut" }
                   total: { type: integer }
-                  page: { type: integer }
-                  size: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
 
   /pipelines/inbox/{item_id}:
     get:
@@ -238,10 +239,13 @@ paths:
               required: [specimen_id]
       responses:
         "200":
-          description: 만들어진 시험 (기존 `TestRunOut`)
+          description: |
+            등록된 항목(`status: registered`, `test_run_id`·`test_run_name` 채워짐).
+            **처음 계획은 `TestRunOut` 이었다** — MatNexus 는 모듈끼리 스키마를 import 하지
+            않으므로(개발 지침) 수집함 항목 상세로 돌려준다. 2026-08-28 저쪽 구현에 맞춤.
           content:
             application/json:
-              schema: { type: object, description: "app.modules.tests.schemas.TestRunOut" }
+              schema: { $ref: "#/components/schemas/InboxItemDetail" }
         "409":
           description: 이미 등록됐거나 버려진 항목 `MNX-PIPE-0007`
           content:
@@ -418,8 +422,13 @@ components:
         test_type_key: { type: [string, "null"] }
         profile_key: { type: [string, "null"] }
         test_run_id: { type: [string, "null"], format: uuid }
+        test_run_name: { type: [string, "null"] }
+        connector_name: { type: [string, "null"] }
+        test_type_label: { type: [string, "null"] }
+        candidate_count: { type: integer, default: 0 }
         error: { type: [string, "null"] }
         received_at: { type: string, format: date-time }
+        resolved_at: { type: [string, "null"], format: date-time }
       required: [id, status, connector_id, source_key, filename, size, sha256, hints, received_at]
 
     InboxItemDetail:
