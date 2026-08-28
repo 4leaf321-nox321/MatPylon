@@ -18,7 +18,7 @@ import { extractHints } from "./hints";
 import { Ledger, type FileRow } from "./ledger";
 import { scanSource } from "./scanner";
 import { nextRunAt } from "./scheduler";
-import { MatNexusClient } from "./matnexus";
+import { HASH_MISMATCH, MatNexusClient } from "./matnexus";
 import { memorySecrets, type SecretStore } from "./secrets";
 import { noTransport, type Transport } from "./transport";
 
@@ -47,6 +47,8 @@ export class Engine extends EventEmitter {
   private sendTimer: NodeJS.Timeout | null = null;
   private lastSendAt: number | null = null;
   private lastError: string | null = null;
+  /** heartbeat 가 알려 준 서버 한도. 모르면 null — 그냥 보내고 413 을 받는다. */
+  private uploadLimit: number | null = null;
   private nextSendAt: number | null = null;
 
   constructor(private readonly options: EngineOptions) {
@@ -60,6 +62,13 @@ export class Engine extends EventEmitter {
     this.ledger = new Ledger(path.join(options.dataDir, "ledger.sqlite"));
     const recovered = this.ledger.recoverSending();
     if (recovered) this.log(`지난 실행에서 보내다 만 ${recovered}건을 다시 대기로`);
+    const pruned = this.ledger.prune(this.now() - this.config.retentionDays * 86_400_000);
+    if (pruned) this.log(`보존 기간(${this.config.retentionDays}일) 지난 원장 ${pruned}건 정리`);
+  }
+
+  /** 설정 파일이 없던 첫 실행인가. 셸이 자동 시작 기본값을 정할 때 본다. */
+  static isFirstRun(dataDir: string): boolean {
+    return !existsSync(path.join(dataDir, "config.json"));
   }
 
   getConfig(): Config {
@@ -81,16 +90,20 @@ export class Engine extends EventEmitter {
 
   /** 설정에서 클라이언트를 만든다. 서버 URL 이 없으면 보내지 않는 transport. */
   private buildTransport(): Transport {
-    const { url, connectorId } = this.config.server;
+    const { url, connectorId, tls } = this.config.server;
     if (!url) return noTransport;
-    return new MatNexusClient({ baseUrl: url, secrets: this.secrets, connectorId });
+    return new MatNexusClient({ baseUrl: url, secrets: this.secrets, connectorId, tls });
   }
 
   /** 화면의 「연결 확인」·커넥터 등록이 쓴다. 설정과 무관한 URL 로도 부를 수 있어야
    * 마법사에서 저장 전에 확인한다. */
-  client(url = this.config.server.url, connectorId = this.config.server.connectorId): MatNexusClient {
+  client(
+    url = this.config.server.url,
+    connectorId = this.config.server.connectorId,
+    tls = this.config.server.tls,
+  ): MatNexusClient {
     if (!url) throw new Error("서버 URL 이 없습니다");
-    return new MatNexusClient({ baseUrl: url, secrets: this.secrets, connectorId });
+    return new MatNexusClient({ baseUrl: url, secrets: this.secrets, connectorId, tls });
   }
 
   start(): void {
@@ -176,6 +189,14 @@ export class Engine extends EventEmitter {
       this.ledger.markFailed(row.id, "설정에 없는 소스입니다");
       return false;
     }
+    // 서버 한도를 알면 보내기 전에 거른다 — 413 을 받으려고 100MB 를 올리지 않는다.
+    if (this.uploadLimit !== null && row.size > this.uploadLimit) {
+      this.ledger.markFailed(
+        row.id,
+        `서버 한도(${Math.round(this.uploadLimit / 1048576)}MB)보다 큽니다`,
+      );
+      return false;
+    }
     this.ledger.claim(row.id);
     const result = await this.transport.deliver({
       sourceKey: row.source_key,
@@ -195,6 +216,12 @@ export class Engine extends EventEmitter {
         this.log(`실패(재시도 안 함): ${row.path} — ${result.error}`);
         break;
       case "retry":
+        // 해시 불일치는 한 번만 더 본다. 두 번 깨지면 전송이 아니라 파일이 문제다.
+        if (result.error.startsWith(HASH_MISMATCH) && row.attempts >= 1) {
+          this.ledger.markFailed(row.id, `${result.error} (재전송해도 같음)`);
+          this.log(`실패(해시 불일치 2회): ${row.path}`);
+          break;
+        }
         this.ledger.markRetry(row.id, result.error, this.now());
         this.log(`나중에 다시: ${row.path} — ${result.error}`);
         break;
@@ -210,23 +237,22 @@ export class Engine extends EventEmitter {
   /** 상태 보고. 실패해도 전송과 무관하다 — 로그만 남긴다. */
   private async heartbeat(): Promise<void> {
     if (!(this.transport instanceof MatNexusClient) || !this.transport.configured()) return;
-    const files = this.ledger.list(undefined, 10_000);
     const sources = this.config.sources.map((s) => {
-      const mine = files.filter((f) => f.source_key === s.key);
-      const lastSent = mine.filter((f) => f.sent_at).map((f) => f.sent_at!).sort().at(-1);
+      const st = this.ledger.sourceStats(s.key);
       return {
         key: s.key,
-        pending: mine.filter((f) => f.status === "ready" || f.status === "retry").length,
-        failed: mine.filter((f) => f.status === "failed").length,
-        last_sent_at: lastSent ? new Date(lastSent).toISOString() : null,
+        pending: st.pending,
+        failed: st.failed,
+        last_sent_at: st.lastSentAt ? new Date(st.lastSentAt).toISOString() : null,
       };
     });
     try {
-      await this.transport.heartbeat({
+      const out = await this.transport.heartbeat({
         app_version: this.options.appVersion,
         sources,
         next_run_at: this.nextSendAt ? new Date(this.nextSendAt).toISOString() : null,
       });
+      if (typeof out.upload_limit_bytes === "number") this.uploadLimit = out.upload_limit_bytes;
       this.lastError = null;
     } catch (e) {
       this.lastError = `heartbeat 실패: ${(e as Error).message}`;

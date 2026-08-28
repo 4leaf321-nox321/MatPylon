@@ -28,14 +28,21 @@ export function sha256File(file: string): Promise<string> {
 }
 
 /** 다른 프로세스가 아직 쓰고 있으면 Windows 는 열기를 거부한다(공유 모드에 따라).
- * 확실한 신호는 아니라 mtime 안정화와 함께 쓴다. */
+ * 확실한 신호는 아니라 mtime 안정화와 함께 쓴다.
+ *
+ * `r+` 만 시도하면 **읽기 전용 파일이 영영 `seen`** 이다 — 장비 소프트웨어가 결과를
+ * 읽기 전용으로 떨구는 경우가 있다. 쓰기 열기가 안 되면 읽기로 한 번 더 본다. */
 function canOpen(file: string): boolean {
-  try {
-    closeSync(openSync(file, "r+"));
-    return true;
-  } catch {
-    return false;
+  for (const mode of ["r+", "r"]) {
+    try {
+      closeSync(openSync(file, mode));
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EACCES" && (e as NodeJS.ErrnoException).code !== "EPERM")
+        return false;
+    }
   }
+  return false;
 }
 
 function* walk(dir: string, recursive: boolean, skipDir: string | null): Generator<string> {
@@ -95,12 +102,10 @@ export async function scanSource(
   }
 
   // 원장에는 있는데 폴더에 없는 것 — 사람이 지웠거나 옮겼다. 보내지 않은 것만 표시한다.
-  for (const row of ledger.list()) {
-    if (row.source_key !== source.key || present.has(row.path)) continue;
-    if (row.status === "seen" || row.status === "ready" || row.status === "retry") {
-      ledger.markGone(row.id);
-      result.gone++;
-    }
+  for (const row of ledger.pendingBySource(source.key)) {
+    if (present.has(row.path)) continue;
+    ledger.markGone(row.id);
+    result.gone++;
   }
   return result;
 }

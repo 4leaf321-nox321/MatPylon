@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.node.json && vite build",
-    "package": "npm run build && electron-builder --win",
+    "package": "node scripts/make-icon.mjs && npm run build && electron-builder --win",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -22,6 +22,7 @@
     "better-sqlite3": "^11.6.0",
     "chokidar": "^4.0.1",
     "electron-log": "^5.2.0",
+    "undici": "^6.28.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

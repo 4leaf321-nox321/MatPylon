@@ -43,7 +43,18 @@ export const ConfigSchema = z.object({
     /** 서버가 준 커넥터 id. PAT 는 여기 두지 않는다 — safeStorage 로 따로. */
     connectorId: z.string().nullable().default(null),
     connectorName: z.string().default(""),
+    /** 사내망 HTTPS. 자체 서명 인증서는 Node 가 거부한다 — 둘 중 하나로 푼다. */
+    tls: z
+      .object({
+        /** 인증서 검증을 끈다. 폐쇄망에서 CA 를 못 받을 때. 화면이 경고한다. */
+        insecure: z.boolean().default(false),
+        /** 사내 CA 인증서(PEM) 경로. 있으면 이것으로 검증한다. */
+        caFile: z.string().nullable().default(null),
+      })
+      .default({}),
   }).default({}),
+  /** 끝난 원장 행(보냄·중복·사라짐)을 이 일수 뒤 지운다. 실패는 남긴다. */
+  retentionDays: z.number().int().min(7).max(3650).default(90),
   sources: z.array(SourceSchema).default([]),
   schedule: ScheduleSchema.default({ kind: "interval", minutes: 60 }),
   /** 폴더를 훑는 주기. 감시 이벤트는 놓칠 수 있어 스캔이 정본이다. */

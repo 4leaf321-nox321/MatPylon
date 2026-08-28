@@ -45,12 +45,14 @@ export interface MatPylonApi {
   hasToken(): Promise<boolean>;
   setToken(token: string | null): Promise<void>;
   /** 저장 전에 URL·토큰으로 /auth/me 를 불러 본다. */
-  testConnection(url: string): Promise<ConnectionCheck>;
+  testConnection(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<ConnectionCheck>;
   registerConnector(url: string, name: string, workspaceId: string): Promise<{ id: string }>;
   listFiles(status?: string): Promise<LedgerRow[]>;
   requeue(id: number): Promise<void>;
   /** 폴더 선택 대화상자. 취소하면 null. */
   pickFolder(): Promise<string | null>;
+  /** 파일 선택(CA 인증서). 취소하면 null. */
+  pickFile(filters: { name: string; extensions: string[] }[]): Promise<string | null>;
   /** 파일명 규칙 미리보기용 — 폴더의 파일 이름 최대 n개. */
   listFilenames(dir: string, limit: number): Promise<string[]>;
   /** 오늘 로그의 마지막 n줄. */
@@ -81,6 +83,7 @@ export const CHANNELS = {
   listFiles: "engine:listFiles",
   requeue: "engine:requeue",
   pickFolder: "app:pickFolder",
+  pickFile: "app:pickFile",
   listFilenames: "app:listFilenames",
   logTail: "app:logTail",
   openLogFolder: "app:openLogFolder",

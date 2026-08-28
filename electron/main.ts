@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
 import log from "electron-log/main";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -106,10 +106,18 @@ function buildTrayMenu(): void {
     },
   ]);
   tray?.setContextMenu(menu);
-  tray?.setToolTip(`MatPylon ${s.appVersion} — ${s.running ? "동작 중" : "일시 정지"}`);
+  tray?.setToolTip(
+    `MatPylon ${s.appVersion} — ${s.running ? "동작 중" : "일시 정지"}` +
+      ` · 대기 ${s.counts.ready} · 실패 ${s.counts.failed}`,
+  );
 }
 
 app.whenReady().then(() => {
+  // 첫 실행이면 자동 시작을 켠다 — 트레이 상주 앱이 로그인 뒤 안 떠 있으면 아무것도 안 보낸다.
+  // 사용자가 「정보」에서 끄면 그 뒤로는 건드리지 않는다(설정 파일이 생기므로).
+  if (Engine.isFirstRun(app.getPath("userData")) && app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: true });
+  }
   engine = new Engine({
     appVersion: app.getVersion(),
     dataDir: app.getPath("userData"),
@@ -120,8 +128,14 @@ app.whenReady().then(() => {
   tray.on("double-click", showWindow);
   buildTrayMenu();
 
+  let notifiedError: string | null = null;
   engine.on("status", (status) => {
     buildTrayMenu();
+    // 전송이 멈춘 이유는 창을 안 열어도 보여야 한다. 같은 오류는 한 번만.
+    if (status.lastError && status.lastError !== notifiedError && Notification.isSupported()) {
+      new Notification({ title: "MatPylon — 전송 중단", body: status.lastError }).show();
+    }
+    notifiedError = status.lastError;
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send(CHANNELS.status, status);
   });
 
@@ -133,9 +147,9 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.setConfig, (_e, config: unknown) => engine.setConfig(parseConfig(config)));
   ipcMain.handle(CHANNELS.hasToken, () => engine.secrets.getToken() !== null);
   ipcMain.handle(CHANNELS.setToken, (_e, token: string | null) => engine.setToken(token));
-  ipcMain.handle(CHANNELS.testConnection, async (_e, url: string) => {
+  ipcMain.handle(CHANNELS.testConnection, async (_e, url: string, tls?: { insecure: boolean; caFile: string | null }) => {
     try {
-      const me = await engine.client(url, null).me();
+      const me = await engine.client(url, null, tls).me();
       return { ok: true, user: me.display_name ?? me.email ?? me.id };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
@@ -151,6 +165,10 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.requeue, (_e, id: number) => engine.requeue(id));
   ipcMain.handle(CHANNELS.pickFolder, async () => {
     const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  ipcMain.handle(CHANNELS.pickFile, async (_e, filters: { name: string; extensions: string[] }[]) => {
+    const r = await dialog.showOpenDialog({ properties: ["openFile"], filters });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   });
   ipcMain.handle(CHANNELS.listFilenames, (_e, dir: string, limit: number) => {

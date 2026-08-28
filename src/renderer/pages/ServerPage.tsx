@@ -16,6 +16,7 @@ export function ServerForm({
   const [hasToken, setHasToken] = useState(false);
   const [connectorName, setConnectorName] = useState(config.server.connectorName || defaultConnectorName());
   const [workspaceId, setWorkspaceId] = useState("");
+  const [tls, setTls] = useState(config.server.tls);
   const [check, setCheck] = useState<{ ok: boolean; text: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,7 +37,7 @@ export function ServerForm({
     setCheck(null);
     try {
       if (token.trim()) await saveToken();
-      const r = await window.matpylon.testConnection(url.trim());
+      const r = await window.matpylon.testConnection(url.trim(), tls);
       setCheck(r.ok ? { ok: true, text: `연결됨 — ${r.user}` } : { ok: false, text: r.error ?? "실패" });
     } finally {
       setBusy(false);
@@ -46,7 +47,10 @@ export function ServerForm({
   const save = async () => {
     setMsg(null);
     if (token.trim()) await saveToken();
-    const err = await onSaved({ ...config, server: { ...config.server, url: url.trim() || null, connectorName } });
+    const err = await onSaved({
+      ...config,
+      server: { ...config.server, url: url.trim() || null, connectorName, tls },
+    });
     setMsg(err ?? "저장했습니다");
   };
 
@@ -57,7 +61,7 @@ export function ServerForm({
       const { id } = await window.matpylon.registerConnector(url.trim(), connectorName, workspaceId.trim());
       const err = await onSaved({
         ...config,
-        server: { url: url.trim(), connectorId: id, connectorName },
+        server: { url: url.trim(), connectorId: id, connectorName, tls },
       });
       setMsg(err ?? `커넥터를 등록했습니다: ${id}`);
     } catch (e) {
@@ -98,6 +102,33 @@ export function ServerForm({
               )}
             </div>
           </Field>
+          {url.trim().startsWith("https://") && (
+            <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-medium text-slate-600">HTTPS 인증서</div>
+              <Field label="사내 CA 인증서 파일(PEM)" hint="서버 인증서를 발급한 사내 CA. 있으면 이것으로 검증합니다">
+                <div className="flex gap-2">
+                  <Input value={tls.caFile ?? ""} onChange={(e) => setTls({ ...tls, caFile: e.target.value || null })} />
+                  <Button
+                    onClick={async () => {
+                      const f = await window.matpylon.pickFile([{ name: "인증서", extensions: ["pem", "crt", "cer"] }]);
+                      if (f) setTls({ ...tls, caFile: f });
+                    }}
+                  >
+                    찾기
+                  </Button>
+                </div>
+              </Field>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={tls.insecure} onChange={(e) => setTls({ ...tls, insecure: e.target.checked })} />
+                인증서 검증 끄기
+              </label>
+              {tls.insecure && (
+                <p className="text-xs text-amber-700">
+                  검증을 끄면 중간자가 토큰을 가로챌 수 있습니다. CA 파일을 받을 수 없을 때만, 폐쇄망 안에서만 쓰세요.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <Button disabled={busy || !url.trim()} onClick={test}>
               연결 확인

@@ -195,6 +195,41 @@ export class Ledger {
     return c;
   }
 
+  /** 한 소스의 **아직 안 끝난** 행 전부. 상한 없음 — 사라짐 판정이 이것으로 하므로
+   * 200건에서 잘리면 그 뒤 파일은 영영 `seen` 으로 남는다(실제로 그랬다). */
+  pendingBySource(sourceKey: string): FileRow[] {
+    return this.db
+      .prepare(
+        "SELECT * FROM files WHERE source_key = ? AND status IN ('seen','ready','retry')",
+      )
+      .all(sourceKey) as FileRow[];
+  }
+
+  /** heartbeat 용 — 소스별 대기·실패·마지막 전송. 행을 다 읽지 않고 SQL 로 센다. */
+  sourceStats(sourceKey: string): { pending: number; failed: number; lastSentAt: number | null } {
+    const r = this.db
+      .prepare(
+        `SELECT
+           SUM(status IN ('ready','retry')) AS pending,
+           SUM(status = 'failed') AS failed,
+           MAX(sent_at) AS last_sent
+         FROM files WHERE source_key = ?`,
+      )
+      .get(sourceKey) as { pending: number | null; failed: number | null; last_sent: number | null };
+    return { pending: r.pending ?? 0, failed: r.failed ?? 0, lastSentAt: r.last_sent };
+  }
+
+  /** 끝난 행(sent·duplicate·gone)을 보존 기간 뒤 지운다. `failed` 는 사람이 봐야 하니 남긴다.
+   * 지우면 같은 해시가 다시 오면 다시 보내지만, 서버가 409 로 막는다. */
+  prune(olderThanMs: number): number {
+    return this.db
+      .prepare(
+        `DELETE FROM files WHERE status IN ('sent','duplicate','gone')
+         AND COALESCE(sent_at, observed_at) < ?`,
+      )
+      .run(olderThanMs).changes;
+  }
+
   list(status?: FileStatus, limit = 200): FileRow[] {
     return status
       ? (this.db

@@ -2,11 +2,14 @@
  *
  * 규약은 MatNexus 의 것이다: 성공은 리소스 그대로, 오류만
  * `{error:{code,message,request_id,details}}`, 인증은 PAT Bearer(ADR 0001·0002).
- * 여기서 결과를 sent/rejected/retry/halt 넷으로 접는다 — 원장은 HTTP 를 모른다. */
+ * 여기서 결과를 sent/rejected/retry/halt 넷으로 접는다 — 원장은 HTTP 를 모른다.
+ *
+ * `fetch` 는 Node 내장이 아니라 undici 패키지의 것이다. 내장 fetch 는 TLS 옵션을
+ * 못 받는데, 사내망 HTTPS 는 자체 서명 인증서가 흔하다. */
 
-import { createReadStream, statSync } from "node:fs";
+import { openAsBlob, readFileSync } from "node:fs";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { Agent, fetch as undiciFetch, type Dispatcher, type RequestInit } from "undici";
 import type { SecretStore } from "./secrets";
 import type { Delivery, DeliveryResult, Transport } from "./transport";
 
@@ -55,21 +58,26 @@ export class ApiError extends Error {
   }
 }
 
+export interface TlsOptions {
+  insecure: boolean;
+  caFile: string | null;
+}
+
 export interface ClientOptions {
   baseUrl: string;
   secrets: SecretStore;
   connectorId: string | null;
-  fetch?: typeof fetch;
+  tls?: TlsOptions;
   timeoutMs?: number;
 }
 
 export class MatNexusClient implements Transport {
-  private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly dispatcher: Dispatcher | undefined;
 
   constructor(private readonly options: ClientOptions) {
-    this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 60_000;
+    this.dispatcher = makeDispatcher(options.tls);
   }
 
   configured(): boolean {
@@ -87,15 +95,21 @@ export class MatNexusClient implements Transport {
     return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
   }
 
-  private async request<T>(method: string, p: string, body?: RequestInit["body"], json = true): Promise<T> {
+  private async request<T>(
+    method: string,
+    p: string,
+    body?: RequestInit["body"],
+    json = true,
+  ): Promise<T> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
     try {
-      const res = await this.fetchImpl(this.url(p), {
+      const res = await undiciFetch(this.url(p), {
         method,
         headers: this.headers(json && body ? { "Content-Type": "application/json" } : {}),
         body,
         signal: ctrl.signal,
+        dispatcher: this.dispatcher,
       });
       if (!res.ok) throw new ApiError(res.status, await parseError(res));
       if (res.status === 204) return undefined as T;
@@ -131,7 +145,8 @@ export class MatNexusClient implements Transport {
     );
   }
 
-  /** 파일 1 = 요청 1. 본문은 스트림 — 큰 파일을 메모리에 올리지 않는다. */
+  /** 파일 1 = 요청 1. `openAsBlob` 은 파일을 읽지 않고 Blob 을 만든다 — 본문을 보낼
+   * 때 스트림으로 읽는다. 큰 파일이 메모리에 통째로 오르지 않는다. */
   async deliver(item: Delivery): Promise<DeliveryResult> {
     const form = new FormData();
     form.set("connector_id", this.options.connectorId ?? "");
@@ -140,7 +155,8 @@ export class MatNexusClient implements Transport {
     form.set("client_path", item.path);
     form.set("mtime", new Date(item.mtimeMs).toISOString());
     form.set("hints", JSON.stringify(item.hints));
-    form.set("file", await fileBlob(item.path), path.basename(item.path));
+    // 서버 규약: file 은 마지막 파트여야 스트리밍이 된다.
+    form.set("file", await openAsBlob(item.path), path.basename(item.path));
 
     try {
       const out = await this.request<InboxItemOut>("POST", "/pipelines/inbox", form, false);
@@ -151,7 +167,18 @@ export class MatNexusClient implements Transport {
   }
 }
 
-async function parseError(res: Response): Promise<ServerError | null> {
+/** TLS 설정이 기본이면 dispatcher 를 만들지 않는다 — undici 기본을 쓴다. */
+function makeDispatcher(tls: TlsOptions | undefined): Dispatcher | undefined {
+  if (!tls || (!tls.insecure && !tls.caFile)) return undefined;
+  return new Agent({
+    connect: {
+      rejectUnauthorized: !tls.insecure,
+      ca: tls.caFile ? readFileSync(tls.caFile, "utf8") : undefined,
+    },
+  });
+}
+
+async function parseError(res: { json(): Promise<unknown> }): Promise<ServerError | null> {
   try {
     const body = (await res.json()) as { error?: ServerError };
     return body.error ?? null;
@@ -159,6 +186,9 @@ async function parseError(res: Response): Promise<ServerError | null> {
     return null;
   }
 }
+
+/** 해시 불일치 — 전송 중 깨진 것. 한 번은 다시 보내 본다(원장이 횟수를 센다). */
+export const HASH_MISMATCH = "MNX-PIPE-0003";
 
 /** HTTP 결과 → 원장이 아는 넷. 규칙은 개발계획 §5.3. */
 export function classify(e: unknown): DeliveryResult {
@@ -169,22 +199,11 @@ export function classify(e: unknown): DeliveryResult {
       return { kind: "sent", serverId: String(e.error.details?.existing_id ?? "") || null };
     if (e.status === 401) return { kind: "halt", error: "토큰이 만료됐거나 폐기됐습니다" };
     if (e.status === 429) return { kind: "retry", error: msg };
+    if (e.error?.code === HASH_MISMATCH) return { kind: "retry", error: msg };
     if (e.status >= 400 && e.status < 500) return { kind: "rejected", error: msg };
     return { kind: "retry", error: msg };
   }
   const err = e as Error & { cause?: { code?: string } };
   if (err.name === "AbortError") return { kind: "retry", error: "시간 초과" };
   return { kind: "retry", error: err.cause?.code ?? err.message };
-}
-
-/** Node 의 FormData 는 Blob 을 원한다. 파일 스트림을 Blob 으로 감싸되 통째로 읽지 않는다. */
-async function fileBlob(file: string): Promise<Blob> {
-  const size = statSync(file).size;
-  // 16MB 아래는 그냥 읽는다 — 장비 파일 대부분이 여기 든다. 그 위는 스트림.
-  if (size <= 16 * 1024 * 1024) {
-    const { readFile } = await import("node:fs/promises");
-    return new Blob([await readFile(file)]);
-  }
-  const stream = Readable.toWeb(createReadStream(file)) as ReadableStream;
-  return new Response(stream).blob();
 }
