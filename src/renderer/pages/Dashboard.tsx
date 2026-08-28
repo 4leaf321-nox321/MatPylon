@@ -59,6 +59,18 @@ export function Dashboard() {
             {status.counts.ready} / {status.counts.sent} /{" "}
             <span className={status.counts.failed ? "font-medium text-red-700" : ""}>{status.counts.failed}</span>
           </dd>
+          {status.counts.seen > 0 && (
+            <>
+              <dt className="text-slate-500">안정화 대기</dt>
+              <dd>
+                {status.counts.seen}개 —{" "}
+                {status.stabilizingUntil
+                  ? `${fmtTime(status.stabilizingUntil)} 쯤 대기로 넘어와 자동으로 이어집니다`
+                  : "파일이 잠시 변하지 않아야 보냅니다"}
+                <span className="ml-1 text-xs text-slate-400">(소스의 안정화 시간 동안 파일이 안 변해야 「대기」가 됩니다)</span>
+              </dd>
+            </>
+          )}
           {status.lastError && (
             <>
               <dt className="text-slate-500">마지막 오류</dt>
@@ -129,7 +141,7 @@ export function Dashboard() {
 
 export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, ["ok" | "warn" | "bad" | "muted", string]> = {
-    seen: ["muted", "쓰는 중?"],
+    seen: ["muted", "안정화 대기"],
     ready: ["warn", "대기"],
     sending: ["warn", "보내는 중"],
     sent: ["ok", "보냄"],

@@ -8,7 +8,9 @@ export interface EngineStatus {
   serverConfigured: boolean;
   nextRunAt: string | null;
   lastError: string | null;
-  counts: { ready: number; sent: number; failed: number };
+  counts: { seen: number; ready: number; sent: number; failed: number };
+  /** 안정화 대기 중인 파일이 가장 빨리 대기로 넘어오는 시각. 없으면 null. */
+  stabilizingUntil: string | null;
 }
 
 /** 원장 한 줄 — 이력 화면. 엔진의 FileRow 와 같은 모양이지만 여기서 다시 적는다:

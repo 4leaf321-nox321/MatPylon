@@ -44,6 +44,11 @@ export class Engine extends EventEmitter {
   private readonly now: () => number;
   private readonly log: (msg: string) => void;
   private scanTimer: NodeJS.Timeout | null = null;
+  /** 안정화가 끝나는 시각에 맞춘 일회성 재스캔. 5분 주기를 기다리게 하지 않는다. */
+  private rescanTimer: NodeJS.Timeout | null = null;
+  private stabilizingUntil: number | null = null;
+  /** 「지금 보내기」를 눌렀는데 쓰는 중인 파일이 있었다 — 안정화되면 이어서 보낸다. */
+  private sendAfterStabilize = false;
   private sendTimer: NodeJS.Timeout | null = null;
   private lastSendAt: number | null = null;
   private lastError: string | null = null;
@@ -116,7 +121,8 @@ export class Engine extends EventEmitter {
     this.running = false;
     if (this.scanTimer) clearInterval(this.scanTimer);
     if (this.sendTimer) clearTimeout(this.sendTimer);
-    this.scanTimer = this.sendTimer = null;
+    if (this.rescanTimer) clearTimeout(this.rescanTimer);
+    this.scanTimer = this.sendTimer = this.rescanTimer = null;
     this.emitStatus();
   }
 
@@ -152,7 +158,35 @@ export class Engine extends EventEmitter {
         );
       for (const e of r.errors) this.log(`  ${e}`);
     }
+    this.armRescan();
+    // 「지금 보내기」가 쓰는 중인 파일에 막혀 있었다면, 대기로 넘어온 지금 이어서 보낸다.
+    if (this.sendAfterStabilize && this.ledger.due(this.now()).length > 0) {
+      this.sendAfterStabilize = false;
+      void this.send();
+      return;
+    }
     this.emitStatus();
+  }
+
+  /** 안정화가 끝나는 가장 이른 시각에 재스캔을 예약한다. 5분 스캔 주기와 별개다 —
+   * "1분이면 보낸다더니 아무 일도 없다" 를 없앤다. */
+  private armRescan(): void {
+    if (this.rescanTimer) clearTimeout(this.rescanTimer);
+    this.rescanTimer = null;
+    let earliest: number | null = null;
+    for (const source of this.config.sources) {
+      if (!source.enabled) continue;
+      for (const row of this.ledger.pendingBySource(source.key)) {
+        if (row.status !== "seen") continue;
+        const at = Math.max(row.observed_at, row.mtime_ms) + source.stableMinutes * 60_000;
+        if (earliest === null || at < earliest) earliest = at;
+      }
+    }
+    this.stabilizingUntil = earliest;
+    if (earliest !== null && this.running) {
+      const delay = Math.max(earliest - this.now() + 1000, 1000);
+      this.rescanTimer = setTimeout(() => void this.scan(), delay);
+    }
   }
 
   /** 원장의 due 를 보낸다. 파일 1 = 요청 1 — 부분 실패를 건별로. */
@@ -180,6 +214,12 @@ export class Engine extends EventEmitter {
   async sendNow(): Promise<void> {
     await this.scan();
     await this.send();
+    // 쓰는 중인 파일이 남았으면, 안정화 재스캔이 끝나는 대로 이어서 보낸다.
+    if (this.ledger.counts().seen > 0) {
+      this.sendAfterStabilize = true;
+      this.log("쓰는 중인 파일이 있어, 안정화되면 이어서 보냅니다");
+      this.emitStatus();
+    }
   }
 
   /** true 면 배치를 멈춘다(halt). */
@@ -293,7 +333,8 @@ export class Engine extends EventEmitter {
       serverConfigured: this.transport.configured(),
       lastError: this.lastError,
       nextRunAt: this.running && this.nextSendAt ? new Date(this.nextSendAt).toISOString() : null,
-      counts: { ready: c.ready + c.retry, sent: c.sent, failed: c.failed },
+      counts: { seen: c.seen, ready: c.ready + c.retry, sent: c.sent, failed: c.failed },
+      stabilizingUntil: this.stabilizingUntil ? new Date(this.stabilizingUntil).toISOString() : null,
     };
   }
 

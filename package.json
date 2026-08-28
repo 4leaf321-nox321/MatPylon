@@ -1,7 +1,7 @@
 {
   "name": "matpylon",
   "productName": "MatPylon",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "시험장비 PC 수집 에이전트 — MatNexus 에 장비 파일을 배달한다",
   "private": true,
   "main": "dist-electron/main.js",

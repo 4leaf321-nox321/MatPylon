@@ -69,7 +69,7 @@ describe("engine", () => {
       { material_code: "B", specimen: "2" },
       { material_code: "C", specimen: "3" },
     ]);
-    expect(engine.status().counts).toEqual({ ready: 1, sent: 1, failed: 1 });
+    expect(engine.status().counts).toEqual({ seen: 0, ready: 1, sent: 1, failed: 1 });
     expect(engine.files("retry")).toHaveLength(1);
     engine.close();
   });

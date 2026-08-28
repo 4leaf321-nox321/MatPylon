@@ -57,6 +57,11 @@ function createWindow(): BrowserWindow {
     }
   });
   w.once("ready-to-show", () => w.show());
+  // Windows 에서 트레이로 숨겼다 다시 열면 입력칸이 클릭돼도 포커스를 못 받는 일이 있다
+  // (다른 앱을 눌렀다 돌아오면 풀리는 그 증상). 렌더러에 포커스를 명시적으로 넘긴다.
+  const giveFocus = () => setTimeout(() => !w.isDestroyed() && w.webContents.focus(), 50);
+  w.on("show", giveFocus);
+  w.on("focus", giveFocus);
   // 개발용: `--screenshot=경로` 로 띄우면 화면을 찍고 종료한다. 바탕화면을 찍지 않고
   // 창 자체를 찍으므로 다른 창에 가려도 된다.
   const shot = process.argv.find((a) => a.startsWith("--screenshot="))?.slice("--screenshot=".length);
@@ -74,11 +79,13 @@ function createWindow(): BrowserWindow {
 }
 
 function showWindow(): void {
-  if (!win || win.isDestroyed()) win = createWindow();
-  else {
-    win.show();
-    win.focus();
+  if (!win || win.isDestroyed()) {
+    win = createWindow();
+    return;
   }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
 }
 
 function trayIcon() {
