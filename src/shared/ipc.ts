@@ -13,6 +13,8 @@ export interface EngineStatus {
 export interface MatPylonApi {
   getStatus(): Promise<EngineStatus>;
   onStatus(listener: (status: EngineStatus) => void): () => void;
+  /** 스캔 + 전송을 즉시 한 번. */
+  sendNow(): Promise<void>;
   /** 로그인 시 자동 시작. 레지스트리 Run 키 — 관리자 권한 불필요. */
   getAutoLaunch(): Promise<boolean>;
   setAutoLaunch(enabled: boolean): Promise<void>;
@@ -21,6 +23,7 @@ export interface MatPylonApi {
 export const CHANNELS = {
   getStatus: "engine:getStatus",
   status: "engine:status",
+  sendNow: "engine:sendNow",
   getAutoLaunch: "app:getAutoLaunch",
   setAutoLaunch: "app:setAutoLaunch",
 } as const;

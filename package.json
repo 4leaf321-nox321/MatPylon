@@ -14,7 +14,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "pretest": "npm rebuild better-sqlite3 --silent",
+    "predev": "electron-builder install-app-deps"
   },
   "dependencies": {
     "better-sqlite3": "^11.6.0",

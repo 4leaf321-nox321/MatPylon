@@ -19,6 +19,7 @@ let quitting = false;
 const engine = new Engine({
   appVersion: app.getVersion(),
   dataDir: app.getPath("userData"),
+  log: (msg) => log.info(msg),
 });
 
 function createWindow(): BrowserWindow {
@@ -76,6 +77,7 @@ function buildTrayMenu(): void {
     { label: s.running ? "동작 중" : "일시 정지됨", enabled: false },
     { type: "separator" },
     { label: "설정 열기", click: showWindow },
+    { label: "지금 보내기", click: () => void engine.sendNow() },
     {
       label: s.running ? "일시 정지" : "다시 시작",
       click: () => (s.running ? engine.stop() : engine.start()),
@@ -104,6 +106,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle(CHANNELS.getStatus, () => engine.status());
+  ipcMain.handle(CHANNELS.sendNow, () => engine.sendNow());
   ipcMain.handle(CHANNELS.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin);
   ipcMain.handle(CHANNELS.setAutoLaunch, (_e, enabled: boolean) => {
     app.setLoginItemSettings({ openAtLogin: enabled });
@@ -119,5 +122,5 @@ app.on("second-instance", showWindow);
 app.on("window-all-closed", () => {});
 app.on("before-quit", () => {
   quitting = true;
-  engine.stop();
+  engine.close();
 });

@@ -21,3 +21,8 @@ npm run package      # release\MatPylon-Setup-x.y.z.exe
 VSCode 확장 터미널은 이 변수를 `1` 로 두는데, 그러면 Electron 이 GUI 없이 Node 로
 뜨고 `bad option` 만 남기고 나간다. 실측: `alive=False`, 로그 없음.
 `env -u ELECTRON_RUN_AS_NODE ./MatPylon.exe` 로 띄운다.
+
+**`better-sqlite3` 는 두 ABI 사이를 오간다.** `npm run package` 가 Electron ABI 로
+리빌드하고 나면 Node 의 vitest 가 `NODE_MODULE_VERSION 130 vs 115` 로 못 연다. 그래서
+`pretest` 가 Node 용으로, `predev` 가 Electron 용으로 매번 되돌린다. 테스트가 그
+오류로 죽으면 `npm rebuild better-sqlite3` 다.

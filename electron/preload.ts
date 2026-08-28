@@ -8,6 +8,7 @@ const api: MatPylonApi = {
     ipcRenderer.on(CHANNELS.status, handler);
     return () => ipcRenderer.off(CHANNELS.status, handler);
   },
+  sendNow: () => ipcRenderer.invoke(CHANNELS.sendNow),
   getAutoLaunch: () => ipcRenderer.invoke(CHANNELS.getAutoLaunch),
   setAutoLaunch: (enabled) => ipcRenderer.invoke(CHANNELS.setAutoLaunch, enabled),
 };
