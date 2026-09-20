@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Config, Source } from "@engine/config";
-import { HINT_GROUPS, HINT_KEYS, HINT_LABELS } from "@shared/hint-keys";
+import { HINT_GROUPS, HINT_KEYS, HINT_LABELS, type HintKey } from "@shared/hint-keys";
 import { checkRule, extractHints, mergeHints } from "@engine/hints";
 import type { ReferenceMaterial, ResolveItem } from "@shared/ipc";
 import { useConfig } from "../hooks";
-import { Badge, Button, Card, Field, Input, Toggle } from "../ui";
+import { Badge, Button, Card, Field, Input, Select, Toggle } from "../ui";
 
 const EMPTY: Source = {
   key: "",
@@ -147,8 +147,26 @@ export function SourceEditor({
   const ruleInput = useRef<HTMLInputElement>(null);
   const [move, setMove] = useState(source.moveAfterSendTo ?? "");
   const [names, setNames] = useState<string[]>([]);
-  const [defMaterial, setDefMaterial] = useState(source.defaults.material_code ?? "");
-  const [defLot, setDefLot] = useState(source.defaults.lot ?? "");
+  /** 소스 기본값 — 어느 힌트 키든. 재료·로트는 늘 보이고, 나머지는 값이 있거나 사람이 추가한 것만 칸을 그린다.
+   * config.json 에 손으로 넣은 키도 여기 실려 와야 저장할 때 안 사라진다. */
+  const [defaults, setDefaults] = useState<Partial<Record<HintKey, string>>>(() =>
+    Object.fromEntries(HINT_KEYS.filter((k) => source.defaults[k]).map((k) => [k, source.defaults[k]!])),
+  );
+  const [extraDefaultKeys, setExtraDefaultKeys] = useState<HintKey[]>(() =>
+    HINT_KEYS.filter((k) => k !== "material_code" && k !== "lot" && source.defaults[k]),
+  );
+  const setDefault = (k: HintKey, v: string) => setDefaults((d) => ({ ...d, [k]: v }));
+  /** 빈 칸은 뺀다 — `null` 이 스물넷 늘어서는 것은 정보가 아니다. */
+  const cleanDefaults = useMemo(
+    () =>
+      Object.fromEntries(
+        HINT_KEYS.flatMap((k) => {
+          const v = defaults[k]?.trim();
+          return v ? [[k, v]] : [];
+        }),
+      ) as Partial<Record<HintKey, string>>,
+    [defaults],
+  );
   /** 서버 대조 결과. null = 서버 없음/미지원 → 열을 숨긴다. */
   const [resolved, setResolved] = useState<ResolveItem[] | null>(null);
   const [reference, setReference] = useState<ReferenceMaterial[] | null | "loading">(null);
@@ -196,10 +214,10 @@ export function SourceEditor({
         return {
           n,
           hit: Object.keys(fromPath).length > 0,
-          hints: mergeHints({ material_code: defMaterial.trim() || null, lot: defLot.trim() || null }, fromPath),
+          hints: mergeHints(cleanDefaults, fromPath),
         };
       }),
-    [names, rule, defMaterial, defLot],
+    [names, rule, cleanDefaults],
   );
   const matched = preview.filter((p) => p.hit).length;
 
@@ -233,7 +251,7 @@ export function SourceEditor({
       extensions,
       pathRule: rule.trim() || null,
       moveAfterSendTo: move.trim() || null,
-      defaults: { material_code: defMaterial.trim() || null, lot: defLot.trim() || null },
+      defaults: cleanDefaults,
     });
 
   return (
@@ -296,15 +314,59 @@ export function SourceEditor({
       <Card title="이 폴더의 기본값 (선택)">
         <p className="mb-2 text-xs text-slate-500">
           장비는 대개 파일명에 시편 번호만 적습니다. 이 폴더의 파일이 전부 한 재료·한 로트라면 여기 고정하고,
-          경로 규칙은 시편만 뽑게 하세요. 경로 규칙이 뽑은 값이 있으면 그쪽이 이깁니다.
+          경로 규칙은 시편만 뽑게 하세요. 「이 폴더는 전부 80 °C」「전부 의뢰 12」처럼 다른 힌트도 고정할 수
+          있습니다. 경로 규칙이 뽑은 값이 있으면 그쪽이 이깁니다.
         </p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="재료 코드" hint="MatNexus 재료의 이름·grade·별칭 중 하나와 정확히 같아야 합니다">
-            <Input value={defMaterial} onChange={(e) => setDefMaterial(e.target.value)} placeholder="예: SECC_MDOI_1.0" />
+            <Input
+              value={defaults.material_code ?? ""}
+              onChange={(e) => setDefault("material_code", e.target.value)}
+              placeholder="예: SECC_MDOI_1.0"
+            />
           </Field>
           <Field label="로트" hint="시료의 로트">
-            <Input value={defLot} onChange={(e) => setDefLot(e.target.value)} placeholder="예: L240612" />
+            <Input value={defaults.lot ?? ""} onChange={(e) => setDefault("lot", e.target.value)} placeholder="예: L240612" />
           </Field>
+          {extraDefaultKeys.map((k) => (
+            <Field key={k} label={HINT_LABELS[k]} hint={`{${k}}`}>
+              <div className="flex gap-2">
+                <Input value={defaults[k] ?? ""} onChange={(e) => setDefault(k, e.target.value)} />
+                <Button
+                  title="이 기본값을 뺍니다"
+                  onClick={() => {
+                    setExtraDefaultKeys((keys) => keys.filter((x) => x !== k));
+                    setDefault(k, "");
+                  }}
+                >
+                  빼기
+                </Button>
+              </div>
+            </Field>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Select
+            value=""
+            aria-label="다른 기본값 추가"
+            onChange={(e) => {
+              const k = e.target.value as HintKey;
+              if (k) setExtraDefaultKeys((keys) => [...keys, k]);
+            }}
+          >
+            <option value="">+ 다른 기본값…</option>
+            {HINT_GROUPS.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.keys
+                  .filter((k) => k !== "material_code" && k !== "lot" && !extraDefaultKeys.includes(k))
+                  .map((k) => (
+                    <option key={k} value={k}>
+                      {HINT_LABELS[k]} ({k})
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+          </Select>
         </div>
       </Card>
 

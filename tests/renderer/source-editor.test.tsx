@@ -130,4 +130,38 @@ describe("소스 편집기", () => {
       expect.objectContaining({ defaults: { material_code: "SECC_MDOI_1.0", lot: "L240612" } }),
     );
   });
+
+  it("재료·로트 밖의 기본값도 칸으로 보이고, 저장해도 안 사라진다 — config.json 에 손으로 넣은 것", async () => {
+    const { onSave } = show({
+      pathRule: "{specimen}.tra",
+      defaults: { material_code: "SECC_MDOI_1.0", temperature: "80C", commission: "12" },
+    });
+    // 미리보기 힌트에 실린다
+    expect(await screen.findByText(/material_code=SECC_MDOI_1\.0\s+specimen=MD_01\s+temperature=80C\s+commission=12/)).toBeTruthy();
+    // 칸 라벨(div) — 규칙 카드의 끼워 넣기 단추(button)에도 같은 글자가 있다
+    expect(screen.getByText("온도", { selector: "div" })).toBeTruthy();
+    expect(screen.getByText("의뢰 번호", { selector: "div" })).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("예: L240612"), { target: { value: "L1" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaults: { material_code: "SECC_MDOI_1.0", lot: "L1", temperature: "80C", commission: "12" },
+      }),
+    );
+  });
+
+  it("「+ 다른 기본값」으로 키를 골라 칸을 만들고, 「빼기」로 지운다", async () => {
+    const { onSave } = show({});
+    fireEvent.change(screen.getByLabelText("다른 기본값 추가"), { target: { value: "temperature" } });
+    const field = screen.getByText("온도", { selector: "div" }).parentElement!;
+    fireEvent.change(field.querySelector("input")!, { target: { value: "-40" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ defaults: { temperature: "-40" } }));
+
+    fireEvent.click(screen.getByRole("button", { name: "빼기" }));
+    expect(screen.queryByText("온도", { selector: "div" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ defaults: {} }));
+  });
 });

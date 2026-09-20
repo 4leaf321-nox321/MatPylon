@@ -109,11 +109,12 @@ export function checkRule(rule: string): RuleCheck {
  * 기본값은 어느 키든 될 수 있다(「이 폴더는 전부 80 °C」·「전부 의뢰 12」). */
 export function mergeHints(defaults: Partial<Record<HintKey, string | null>>, fromPath: Hints): Hints {
   const out: Hints = {};
+  // 키 순서는 늘 HINT_KEYS 순 — 미리보기 표가 파일마다 다른 순서로 보이지 않게.
   for (const key of HINT_KEYS) {
-    const value = defaults[key];
+    const value = fromPath[key] || defaults[key];
     if (value) out[key] = value;
   }
-  return { ...out, ...fromPath };
+  return out;
 }
 
 /** @param relativePath 소스 폴더 기준 상대경로, 구분자 `/`. 엔진은 `toRelativePath` 로 만든다. */
