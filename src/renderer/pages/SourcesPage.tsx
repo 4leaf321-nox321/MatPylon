@@ -1,21 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Config, Source } from "@engine/config";
-import { HINT_KEYS } from "@shared/hint-keys";
+import { HINT_GROUPS, HINT_KEYS, HINT_LABELS } from "@shared/hint-keys";
 import { checkRule, extractHints, mergeHints } from "@engine/hints";
 import type { ReferenceMaterial, ResolveItem } from "@shared/ipc";
 import { useConfig } from "../hooks";
 import { Badge, Button, Card, Field, Input, Toggle } from "../ui";
-
-/** 단추에 쓰는 우리말 — 규칙에 들어가는 이름은 영문 키 그대로다. */
-const HINT_LABELS: Record<(typeof HINT_KEYS)[number], string> = {
-  material_code: "재료",
-  lot: "로트",
-  specimen: "시편",
-  orientation: "방향",
-  tested_at: "시험일",
-  operator: "시험자",
-  instrument: "장비",
-};
 
 const EMPTY: Source = {
   key: "",
@@ -26,7 +15,7 @@ const EMPTY: Source = {
   stableMinutes: 2,
   pathRule: null,
   moveAfterSendTo: null,
-  defaults: { material_code: null, lot: null },
+  defaults: {},
   enabled: true,
 };
 
@@ -345,16 +334,21 @@ export function SourceEditor({
         </Field>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-slate-500">끼워 넣기:</span>
-          {HINT_KEYS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700 hover:border-blue-400"
-              onClick={() => insertToken(`{${k}}`)}
-              title={`{${k}}`}
-            >
-              {HINT_LABELS[k]}
-            </button>
+          {HINT_GROUPS.map((group) => (
+            <span key={group.label} className="inline-flex flex-wrap items-center gap-1">
+              <span className="text-slate-400">{group.label}</span>
+              {group.keys.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700 hover:border-blue-400"
+                  onClick={() => insertToken(`{${k}}`)}
+                  title={`{${k}}`}
+                >
+                  {HINT_LABELS[k]}
+                </button>
+              ))}
+            </span>
           ))}
           <button
             type="button"

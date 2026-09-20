@@ -105,11 +105,14 @@ export function checkRule(rule: string): RuleCheck {
   };
 }
 
-/** 소스 기본값 위에 규칙의 값을 덮는다 — 파일이 말한 것이 설정보다 구체적이다. */
-export function mergeHints(defaults: { material_code?: string | null; lot?: string | null }, fromPath: Hints): Hints {
+/** 소스 기본값 위에 규칙의 값을 덮는다 — 파일이 말한 것이 설정보다 구체적이다.
+ * 기본값은 어느 키든 될 수 있다(「이 폴더는 전부 80 °C」·「전부 의뢰 12」). */
+export function mergeHints(defaults: Partial<Record<HintKey, string | null>>, fromPath: Hints): Hints {
   const out: Hints = {};
-  if (defaults.material_code) out.material_code = defaults.material_code;
-  if (defaults.lot) out.lot = defaults.lot;
+  for (const key of HINT_KEYS) {
+    const value = defaults[key];
+    if (value) out[key] = value;
+  }
   return { ...out, ...fromPath };
 }
 

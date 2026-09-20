@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkRule, extractHints, ruleKind, toRelativePath } from "@engine/hints";
+import { checkRule, extractHints, mergeHints, ruleKind, toRelativePath } from "@engine/hints";
+import { HINT_KEYS } from "@shared/hint-keys";
 
 const RULE = String.raw`^(?<material_code>[A-Z0-9.-]+)_(?<lot>[^_]+)_(?<specimen>[A-Z]{2}-?\d+)\.tra$`;
 
@@ -116,5 +117,29 @@ describe("소스 기본값과 경로 힌트", () => {
     });
     expect(mergeHints({ material_code: "X", lot: null }, { material_code: "Y" })).toEqual({ material_code: "Y" });
     expect(mergeHints({}, {})).toEqual({});
+  });
+});
+
+describe("새 힌트 키(2026-09-20)", () => {
+  it("스물넷 전부를 규칙 자리로 쓸 수 있다 — 서버가 받는 목록과 같다", () => {
+    expect(HINT_KEYS.length).toBe(24);
+    const rule = "{material_code}/{thickness}/{lot}/{temperature}/{commission}/*_{specimen}.tra";
+    expect(extractHints(rule, "SECC/0.8t/LOT-A/80C/12/tensile_01.tra")).toEqual({
+      material_code: "SECC",
+      thickness: "0.8t",
+      lot: "LOT-A",
+      temperature: "80C",
+      commission: "12",
+      specimen: "01",
+    });
+    expect(checkRule(rule).unknownGroups).toEqual([]);
+  });
+
+  it("소스 기본값은 어느 키든 된다 — 「이 폴더는 전부 80 °C·의뢰 12」", () => {
+    expect(mergeHints({ temperature: "80C", commission: "12", lot: null }, { specimen: "01" })).toEqual({
+      temperature: "80C",
+      commission: "12",
+      specimen: "01",
+    });
   });
 });

@@ -505,16 +505,44 @@ components:
     Hints:
       type: object
       description: |
-        MatPylon 이 파일명 규칙에서 뽑은 **힌트**. 확정이 아니다 — 서버가 프로파일
-        `identity` 와 함께 후보를 좁히는 데 쓴다. 키는 이 일곱 개만. 나머지는 무시.
+        MatPylon 이 경로 규칙에서 뽑은 **힌트**. 확정이 아니다 — 서버가 프로파일
+        `identity` 와 함께 후보를 좁히는 데 쓴다. 키는 아래 스물넷만. 나머지는 무시.
+        값은 전부 문자열. 파일이 같은 것을 말하면 **파일이 이긴다.**
+
+        - 재료: material_code · material_no(M-000123) · thickness(0.8 · 0.8t · 0.8mm) ·
+          details · legacy_id
+        - 시료: lot · sample(번호 또는 이름) · sample_alias · manufacturer · production_date
+        - 시편: specimen · specimen_seq · orientation · standard
+        - 시험: test_type(감지가 갈릴 때 먼저 볼 종류) · temperature(80C · -40 · 353K —
+          단위 없으면 °C) · humidity(85 · 85%RH) · commission(의뢰 번호 — 서버는 잇지
+          않고 먼저 보인다) · repeat(재시험 표시 — 메모) · division · tested_at ·
+          operator · instrument
+        - 통째: record_name(SECC_MDOI_1.0__01__MD_01, 시험 토막이 붙어 있어도 됨)
       properties:
         material_code: { type: string }
+        material_no: { type: string }
+        thickness: { type: string }
+        details: { type: string }
+        legacy_id: { type: string }
         lot: { type: string }
+        sample: { type: string }
+        sample_alias: { type: string }
+        manufacturer: { type: string }
+        production_date: { type: string }
         specimen: { type: string }
+        specimen_seq: { type: string }
         orientation: { type: string }
+        standard: { type: string }
+        test_type: { type: string }
+        temperature: { type: string }
+        humidity: { type: string }
+        commission: { type: string }
+        repeat: { type: string }
+        division: { type: string }
         tested_at: { type: string }
         operator: { type: string }
         instrument: { type: string }
+        record_name: { type: string }
       additionalProperties: false
 
     ResolveResult:

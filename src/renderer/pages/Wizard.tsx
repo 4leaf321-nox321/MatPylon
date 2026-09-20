@@ -83,7 +83,7 @@ export function Wizard({ onDone }: { onDone: () => void }) {
               recursive: false,
               stableMinutes: 2,
               pathRule: null,
-              defaults: { material_code: null, lot: null },
+              defaults: {},
               moveAfterSendTo: null,
               enabled: true,
             }}

@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { HINT_KEYS, type HintKey } from "@shared/hint-keys";
 
 export const SourceSchema = z.object({
   /** 서버 `source_key`. 한 번 정하면 바꾸지 않는다 — 원장과 서버가 이 키로 잇는다. */
@@ -24,10 +25,13 @@ export const SourceSchema = z.object({
   /** 소스 기본값 — "이 폴더 파일은 전부 이 재료·로트". 경로에 없는 힌트를 채운다.
    * 장비는 대개 시편 번호만 적는다. 경로 규칙이 뽑은 값이 있으면 그쪽이 이긴다. */
   defaults: z
-    .object({
-      material_code: z.string().nullable().default(null),
-      lot: z.string().nullable().default(null),
-    })
+    .object(
+      Object.fromEntries(HINT_KEYS.map((key) => [key, z.string().nullable()])) as Record<
+        HintKey,
+        z.ZodNullable<z.ZodString>
+      >,
+    )
+    .partial()
     .default({}),
   /** 보낸 뒤 원본을 옮길 소스 루트 바로 아래 폴더 이름. 원래 폴더 구조를 그 아래에 그대로
    * 미러링한다(`sent\SUS304\LotA\01.tra`). null 이면 제자리(기본, 결정 D). */
