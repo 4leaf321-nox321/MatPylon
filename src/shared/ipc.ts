@@ -50,6 +50,14 @@ export interface ReferenceMaterial {
   samples: { name: string; lot: string; seq_no: number; specimens: { name: string; short: string; orientation: string | null }[] }[];
 }
 
+/** 미리보기가 스캔과 같은 것을 보게 하는 데 필요한 만큼의 소스. */
+export interface PreviewSource {
+  path: string;
+  recursive: boolean;
+  extensions: string[];
+  moveAfterSendTo: string | null;
+}
+
 export interface ConnectionCheck {
   ok: boolean;
   user?: string;
@@ -85,8 +93,8 @@ export interface MatPylonApi {
   pickFolder(): Promise<string | null>;
   /** 파일 선택(CA 인증서). 취소하면 null. */
   pickFile(filters: { name: string; extensions: string[] }[]): Promise<string | null>;
-  /** 파일명 규칙 미리보기용 — 폴더의 파일 이름 최대 n개. */
-  listFilenames(dir: string, limit: number): Promise<string[]>;
+  /** 경로 규칙 미리보기용 — 스캔과 같은 눈으로 본 소스 기준 상대경로 최대 n개. */
+  previewPaths(source: PreviewSource, limit: number): Promise<string[]>;
   /** 오늘 로그의 마지막 n줄. */
   logTail(lines: number): Promise<string>;
   openLogFolder(): Promise<void>;
@@ -121,7 +129,7 @@ export const CHANNELS = {
   requeue: "engine:requeue",
   pickFolder: "app:pickFolder",
   pickFile: "app:pickFile",
-  listFilenames: "app:listFilenames",
+  previewPaths: "app:previewPaths",
   logTail: "app:logTail",
   openLogFolder: "app:openLogFolder",
   openDataFolder: "app:openDataFolder",

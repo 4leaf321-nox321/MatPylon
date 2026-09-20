@@ -43,7 +43,7 @@ export function installApi(
     requeue: vi.fn(async () => {}),
     pickFolder: vi.fn(async () => null),
     pickFile: vi.fn(async () => null),
-    listFilenames: vi.fn(async () => []),
+    previewPaths: vi.fn(async () => []),
     logTail: vi.fn(async () => ""),
     openLogFolder: vi.fn(async () => {}),
     openDataFolder: vi.fn(async () => {}),

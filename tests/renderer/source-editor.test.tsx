@@ -17,14 +17,14 @@ const SOURCE: Source = {
   extensions: [".tra"],
   recursive: false,
   stableMinutes: 2,
-  filenameRule: null,
+  pathRule: null,
   defaults: { material_code: null, lot: null },
   moveAfterSendTo: null,
   enabled: true,
 };
 
 function show(source: Partial<Source>, api: Parameters<typeof installApi>[0] = {}) {
-  installApi({ listFilenames: vi.fn(async () => ["MD_01.tra", "MD_02.tra", "readme.txt"]), ...api });
+  installApi({ previewPaths: vi.fn(async () => ["MD_01.tra", "MD_02.tra", "readme.txt"]), ...api });
   const onSave = vi.fn();
   render(
     <SourceEditor
@@ -41,7 +41,7 @@ function show(source: Partial<Source>, api: Parameters<typeof installApi>[0] = {
 
 describe("소스 편집기", () => {
   it("파일명 규칙이 뽑은 힌트를 파일마다 보여 준다", async () => {
-    show({ filenameRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$` });
+    show({ pathRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$` });
     expect(await screen.findByText("specimen=MD_01")).toBeTruthy();
     expect(screen.getByText("specimen=MD_02")).toBeTruthy();
     // 규칙에 안 맞는 파일도 막지 않는다 — 힌트 없이 간다는 것을 화면이 말한다
@@ -50,7 +50,7 @@ describe("소스 편집기", () => {
 
   it("소스 기본값이 빈 힌트를 채우고, 파일명이 뽑은 값이 이긴다", async () => {
     show({
-      filenameRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$`,
+      pathRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$`,
       defaults: { material_code: "SECC_MDOI_1.0", lot: "L240612" },
     });
     expect(
@@ -58,18 +58,47 @@ describe("소스 편집기", () => {
     ).toBeTruthy();
   });
 
-  it("정규식이 깨졌거나 모르는 그룹 이름이면 경고한다", async () => {
-    show({ filenameRule: "(?<material>.+)" });
-    expect(await screen.findByText(/힌트가 아닌 그룹 이름: material/)).toBeTruthy();
+  it("규칙이 깨졌거나 모르는 자리 이름이면 경고한다", async () => {
+    show({ pathRule: "{material}/{specimen}.tra" });
+    expect(await screen.findByText(/힌트가 아닌 자리 이름: material/)).toBeTruthy();
 
     cleanup();
-    show({ filenameRule: "(" });
-    expect(await screen.findByText(/정규식 오류/)).toBeTruthy();
+    show({ pathRule: "(?<lot>(" });
+    expect(await screen.findByText(/규칙 오류/)).toBeTruthy();
+
+    cleanup();
+    show({ pathRule: "SUS304/01.tra" });
+    expect(await screen.findByText(/규칙에 힌트 자리가 없습니다/)).toBeTruthy();
+  });
+
+  it("템플릿 규칙 — 폴더 계층에서 뽑고, 미리보기는 스캔과 같은 눈으로 본다", async () => {
+    const previewPaths = vi.fn(async () => ["SUS304/LotA/tensile_01.tra", "AL6061/LotB/tensile_02.tra"]);
+    show({ pathRule: "{material_code}/{lot}/*_{specimen}.tra", recursive: true, extensions: [".tra"] }, { previewPaths });
+    expect(await screen.findByText(/material_code=SUS304\s+lot=LotA\s+specimen=01/)).toBeTruthy();
+    expect(screen.getByText(/material_code=AL6061\s+lot=LotB\s+specimen=02/)).toBeTruthy();
+    expect(screen.getByText("템플릿으로 해석", { exact: false })).toBeTruthy();
+    // 하위 폴더·확장자·건너뛰는 폴더까지 넘겨야 스캔이 볼 것과 같은 것을 본다
+    expect(previewPaths).toHaveBeenCalledWith(
+      { path: "C:\\data", recursive: true, extensions: [".tra"], moveAfterSendTo: null },
+      20,
+    );
+  });
+
+  it("경로를 누르면 규칙 칸에 올라가고, 힌트 단추가 고른 자리에 끼워진다", async () => {
+    show({ recursive: true }, { previewPaths: vi.fn(async () => ["SUS304/LotA/tensile_01.tra"]) });
+    fireEvent.click(await screen.findByRole("button", { name: "SUS304/LotA/tensile_01.tra" }));
+    const input = screen.getByPlaceholderText("예: {material_code}/{lot}/*_{specimen}.tra") as HTMLInputElement;
+    expect(input.value).toBe("SUS304/LotA/tensile_01.tra");
+    // 「SUS304」 를 고르고 「재료」 를 누른다
+    input.setSelectionRange(0, 6);
+    fireEvent.click(screen.getByRole("button", { name: "재료" }));
+    expect(input.value).toBe("{material_code}/LotA/tensile_01.tra");
+    expect(await screen.findByText("material_code=SUS304")).toBeTruthy();
   });
 
   it("MatNexus 대조 결과를 파일 옆에 붙인다", async () => {
     show(
-      { filenameRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$` },
+      { pathRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$` },
       {
         resolveHints: vi.fn(async () => [
           { outcome: "unique" as const, label: "승인 대기(후보 1)", detail: "SECC__01__MD_01" },
@@ -84,7 +113,7 @@ describe("소스 편집기", () => {
   });
 
   it("서버가 대조를 못 해 주면(구버전·미연결) 그 열을 아예 안 그린다", async () => {
-    show({ filenameRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$` }); // resolveHints → null
+    show({ pathRule: String.raw`^(?<specimen>[A-Z]{2}_\d+)\.tra$` }); // resolveHints → null
     await screen.findByText("specimen=MD_01");
     await waitFor(() => expect(window.matpylon.resolveHints).toHaveBeenCalled());
     expect(screen.queryByText("MatNexus 대조")).toBeNull();

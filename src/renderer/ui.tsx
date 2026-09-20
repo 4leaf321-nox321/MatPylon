@@ -1,5 +1,5 @@
 /** 작은 프리미티브. shadcn 을 들이기엔 화면이 일곱이라 이 정도면 된다 — 필요해지면 바꾼다. */
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 
 const cx = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(" ");
 
@@ -26,9 +26,14 @@ export function Button({
   );
 }
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+/** `ref` 는 커서 위치가 필요한 곳(경로 규칙 끼워 넣기)만 쓴다. */
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
+  { className, ...props },
+  ref,
+) {
   return (
     <input
+      ref={ref}
       {...props}
       className={cx(
         "w-full min-w-0 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100",
@@ -36,7 +41,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
       )}
     />
   );
-}
+});
 
 export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
@@ -50,7 +55,7 @@ export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectE
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="block">
       <div className="mb-1 text-xs font-medium text-slate-600">{label}</div>

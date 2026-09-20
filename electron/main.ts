@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
 import log from "electron-log/main";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Engine } from "@engine/index";
 import { configPath, parseConfig } from "@engine/config";
-import { CHANNELS } from "@shared/ipc";
+import { previewPaths } from "@engine/scanner";
+import { CHANNELS, type PreviewSource } from "@shared/ipc";
 import { fileSecrets } from "./secrets";
 
 // 개발용: `--data-dir=경로` 로 설정·원장·잠금을 다른 곳에 둔다. 설치된 앱이 떠 있는
@@ -256,16 +257,7 @@ app.whenReady().then(() => {
     const r = await dialog.showOpenDialog({ properties: ["openFile"], filters });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   });
-  ipcMain.handle(CHANNELS.listFilenames, (_e, dir: string, limit: number) => {
-    try {
-      return readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isFile())
-        .map((d) => d.name)
-        .slice(0, limit);
-    } catch {
-      return [];
-    }
-  });
+  ipcMain.handle(CHANNELS.previewPaths, (_e, source: PreviewSource, limit: number) => previewPaths(source, limit));
   const logFile = () => log.transports.file.getFile().path;
   ipcMain.handle(CHANNELS.logTail, (_e, lines: number) => {
     try {

@@ -1,5 +1,5 @@
 /** 엔진 한 바퀴 — 스캔 → 원장 → 전송 결과 셋이 상태로 간다. 타이머 없이 직접 부른다. */
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,7 +24,7 @@ function fakeTransport(script: Record<string, DeliveryResult>): Transport & { se
   };
 }
 
-function build(transport: Transport, move: string | null = null) {
+function build(transport: Transport, move: string | null = null, recursive = false) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "matpylon-data-"));
   const srcDir = mkdtempSync(path.join(tmpdir(), "matpylon-src-"));
   dirs.push(dataDir, srcDir);
@@ -36,13 +36,15 @@ function build(transport: Transport, move: string | null = null) {
       key: "zwick",
       name: "zwick",
       path: srcDir,
-      filenameRule: String.raw`^(?<material_code>[^_]+)_(?<specimen>[^.]+)\.tra$`,
+      pathRule: String.raw`^(?<material_code>[^_]+)_(?<specimen>[^.]+)\.tra$`,
       moveAfterSendTo: move,
+      recursive,
     }),
   );
   engine.setConfig(config);
   const write = (name: string, body: string) => {
     const f = path.join(srcDir, name);
+    mkdirSync(path.dirname(f), { recursive: true });
     writeFileSync(f, body);
     utimesSync(f, T0 / 1000, T0 / 1000);
     return f;
@@ -105,5 +107,21 @@ describe("engine", () => {
     await kept.engine.sendNow();
     expect(existsSync(g)).toBe(true);
     kept.engine.close();
+  });
+
+  it("하위 폴더의 파일은 루트 sent 아래에 구조 그대로 옮기고, 옮긴 것은 다시 안 잡는다", async () => {
+    const t = build(fakeTransport({}), "sent", true);
+    const f = t.write(path.join("SUS304", "LotA", "A_1.tra"), "a");
+    await t.engine.scan();
+    t.tick(3 * MIN);
+    await t.engine.sendNow();
+    expect(existsSync(f)).toBe(false);
+    expect(existsSync(path.join(t.srcDir, "sent", "SUS304", "LotA", "A_1.tra"))).toBe(true);
+    // 원본 자리에 sent 폴더를 만들지 않는다 — 원본 트리에는 안 보낸 것만 남는다
+    expect(existsSync(path.join(t.srcDir, "SUS304", "LotA", "sent"))).toBe(false);
+
+    await t.engine.scan();
+    expect(t.engine.files().filter((r) => r.path.includes(`${path.sep}sent${path.sep}`))).toHaveLength(0);
+    t.engine.close();
   });
 });

@@ -31,7 +31,7 @@ describe("config", () => {
       extensions: [".tra"],
       recursive: false,
       stableMinutes: 2,
-      filenameRule: null,
+      pathRule: null,
       defaults: { material_code: null, lot: null },
       moveAfterSendTo: null,
       enabled: true,
@@ -50,5 +50,13 @@ describe("config", () => {
   it("소스 키가 겹치면 거절한다", () => {
     const s = { key: "a", name: "x", path: "y" };
     expect(() => parseConfig({ sources: [s, s] })).toThrow(ConfigError);
+  });
+});
+
+describe("설정 이전", () => {
+  it("v0.1.7 의 filenameRule 은 pathRule 로 읽는다 — 규칙이 조용히 사라지면 안 된다", () => {
+    const c = parseConfig({ sources: [{ key: "zwick", name: "x", path: "y", filenameRule: "(?<specimen>.+)" }] });
+    expect(c.sources[0]?.pathRule).toBe("(?<specimen>.+)");
+    expect("filenameRule" in c.sources[0]!).toBe(false);
   });
 });

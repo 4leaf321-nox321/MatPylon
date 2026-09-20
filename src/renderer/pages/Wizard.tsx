@@ -82,7 +82,7 @@ export function Wizard({ onDone }: { onDone: () => void }) {
               extensions: [],
               recursive: false,
               stableMinutes: 2,
-              filenameRule: null,
+              pathRule: null,
               defaults: { material_code: null, lot: null },
               moveAfterSendTo: null,
               enabled: true,

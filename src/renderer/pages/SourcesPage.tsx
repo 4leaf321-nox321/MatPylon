@@ -1,10 +1,21 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Config, Source } from "@engine/config";
 import { HINT_KEYS } from "@shared/hint-keys";
 import { checkRule, extractHints, mergeHints } from "@engine/hints";
 import type { ReferenceMaterial, ResolveItem } from "@shared/ipc";
 import { useConfig } from "../hooks";
 import { Badge, Button, Card, Field, Input, Toggle } from "../ui";
+
+/** 단추에 쓰는 우리말 — 규칙에 들어가는 이름은 영문 키 그대로다. */
+const HINT_LABELS: Record<(typeof HINT_KEYS)[number], string> = {
+  material_code: "재료",
+  lot: "로트",
+  specimen: "시편",
+  orientation: "방향",
+  tested_at: "시험일",
+  operator: "시험자",
+  instrument: "장비",
+};
 
 const EMPTY: Source = {
   key: "",
@@ -13,7 +24,7 @@ const EMPTY: Source = {
   extensions: [],
   recursive: false,
   stableMinutes: 2,
-  filenameRule: null,
+  pathRule: null,
   moveAfterSendTo: null,
   defaults: { material_code: null, lot: null },
   enabled: true,
@@ -84,7 +95,7 @@ export function SourcesPage() {
                 {s.extensions.join(" ") || "모든 확장자"} · 안정화 {s.stableMinutes}분
                 {s.recursive && " · 하위 폴더 포함"}
                 {s.moveAfterSendTo && ` · 보낸 뒤 ${s.moveAfterSendTo}\\ 로 이동`}
-                {s.filenameRule && " · 파일명 규칙"}
+                {s.pathRule && " · 경로 규칙"}
               </div>
             </div>
             <div className="flex gap-2">
@@ -143,7 +154,8 @@ export function SourceEditor({
 }) {
   const [s, setS] = useState<Source>(source);
   const [ext, setExt] = useState(source.extensions.join(" "));
-  const [rule, setRule] = useState(source.filenameRule ?? "");
+  const [rule, setRule] = useState(source.pathRule ?? "");
+  const ruleInput = useRef<HTMLInputElement>(null);
   const [move, setMove] = useState(source.moveAfterSendTo ?? "");
   const [names, setNames] = useState<string[]>([]);
   const [defMaterial, setDefMaterial] = useState(source.defaults.material_code ?? "");
@@ -153,23 +165,54 @@ export function SourceEditor({
   const [reference, setReference] = useState<ReferenceMaterial[] | null | "loading">(null);
   const [refQuery, setRefQuery] = useState("");
 
+  const extensions = useMemo(
+    () =>
+      ext
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .map((e) => (e.startsWith(".") ? e : `.${e}`).toLowerCase()),
+    [ext],
+  );
+  // 미리보기는 스캔과 같은 눈으로 본다 — 하위 폴더·확장자·건너뛰는 폴더가 바뀌면 다시.
   useEffect(() => {
-    if (s.path) void window.matpylon.listFilenames(s.path, 20).then(setNames);
-    else setNames([]);
-  }, [s.path]);
+    if (!s.path) {
+      setNames([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      void window.matpylon
+        .previewPaths({ path: s.path, recursive: s.recursive, extensions, moveAfterSendTo: move.trim() || null }, 20)
+        .then(setNames);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [s.path, s.recursive, extensions, move]);
+
+  /** 힌트 자리를 커서 위치(또는 고른 범위)에 끼워 넣는다 — 경로를 규칙 칸에 올린 뒤 바꿀 부분을 골라 누른다. */
+  const insertToken = (token: string) => {
+    const el = ruleInput.current;
+    const start = el?.selectionStart ?? rule.length;
+    const end = el?.selectionEnd ?? rule.length;
+    setRule(rule.slice(0, start) + token + rule.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + token.length, start + token.length);
+    });
+  };
 
   const ruleCheck = useMemo(() => (rule ? checkRule(rule) : null), [rule]);
   const preview = useMemo(
     () =>
-      names.map((n) => ({
-        n,
-        hints: mergeHints(
-          { material_code: defMaterial.trim() || null, lot: defLot.trim() || null },
-          extractHints(rule || null, n),
-        ),
-      })),
+      names.map((n) => {
+        const fromPath = extractHints(rule || null, n);
+        return {
+          n,
+          hit: Object.keys(fromPath).length > 0,
+          hints: mergeHints({ material_code: defMaterial.trim() || null, lot: defLot.trim() || null }, fromPath),
+        };
+      }),
     [names, rule, defMaterial, defLot],
   );
+  const matched = preview.filter((p) => p.hit).length;
 
   // 규칙·기본값이 바뀌면 잠깐 뒤 서버에 물어본다. 타자마다 부르지 않는다.
   useEffect(() => {
@@ -198,11 +241,8 @@ export function SourceEditor({
   const submit = () =>
     onSave({
       ...s,
-      extensions: ext
-        .split(/[\s,]+/)
-        .filter(Boolean)
-        .map((e) => (e.startsWith(".") ? e : `.${e}`).toLowerCase()),
-      filenameRule: rule.trim() || null,
+      extensions,
+      pathRule: rule.trim() || null,
       moveAfterSendTo: move.trim() || null,
       defaults: { material_code: defMaterial.trim() || null, lot: defLot.trim() || null },
     });
@@ -254,7 +294,7 @@ export function SourceEditor({
               onChange={(e) => setS({ ...s, stableMinutes: Number(e.target.value) })}
             />
           </Field>
-          <Field label="보낸 뒤 이동할 하위 폴더" hint="비우면 제자리에 둡니다(권장). 장비 SW 가 파일을 다시 열면 이동이 깨질 수 있습니다">
+          <Field label="보낸 뒤 이동할 하위 폴더" hint="비우면 제자리에 둡니다(권장). 적으면 소스 폴더 아래 이 이름의 폴더로, 원래 폴더 구조 그대로 옮깁니다(sent\SUS304\LotA\…). 장비 SW 가 파일을 다시 열면 이동이 깨질 수 있습니다">
             <Input value={move} onChange={(e) => setMove(e.target.value)} placeholder="예: sent" />
           </Field>
         </div>
@@ -267,7 +307,7 @@ export function SourceEditor({
       <Card title="이 폴더의 기본값 (선택)">
         <p className="mb-2 text-xs text-slate-500">
           장비는 대개 파일명에 시편 번호만 적습니다. 이 폴더의 파일이 전부 한 재료·한 로트라면 여기 고정하고,
-          파일명 규칙은 시편만 뽑게 하세요. 파일명 규칙이 뽑은 값이 있으면 그쪽이 이깁니다.
+          경로 규칙은 시편만 뽑게 하세요. 경로 규칙이 뽑은 값이 있으면 그쪽이 이깁니다.
         </p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="재료 코드" hint="MatNexus 재료의 이름·grade·별칭 중 하나와 정확히 같아야 합니다">
@@ -279,28 +319,86 @@ export function SourceEditor({
         </div>
       </Card>
 
-      <Card title="파일명 규칙 (선택)">
+      <Card title="경로 규칙 (선택)">
+        <p className="mb-2 text-xs text-slate-500">
+          폴더 이름과 파일 이름에서 재료·로트·시편을 뽑습니다. 아래 미리보기의 경로 하나를 눌러 규칙 칸에 올리고,
+          바뀌는 부분을 드래그한 뒤 힌트 단추를 누르세요. 나머지 글자는 그대로 맞춰야 합니다.
+        </p>
         <Field
-          label="정규식"
-          hint={`이름 있는 그룹으로 힌트를 뽑습니다. 쓸 수 있는 이름: ${HINT_KEYS.join(", ")}. 안 맞는 파일도 힌트 없이 보냅니다.`}
+          label="규칙"
+          hint={
+            <>
+              <code>{"{material_code}"}</code> 같은 자리 하나가 폴더 한 단계 또는 이름의 한 토막. <code>*</code> 는 아무
+              글자, <code>**/</code> 는 폴더 여러 단계. <code>/</code> 가 없으면 파일 이름에만 댑니다(하위 폴더 어디든).
+              대소문자는 안 가립니다. 안 맞는 파일도 힌트 없이 보냅니다. 정규식이 익숙하면{" "}
+              <code>{"(?<lot>...)"}</code> 처럼 이름 있는 그룹으로 적어도 됩니다.
+            </>
+          }
         >
           <Input
+            ref={ruleInput}
             className="font-mono"
             value={rule}
             onChange={(e) => setRule(e.target.value)}
-            placeholder={String.raw`^(?<material_code>[^_]+)_(?<lot>[^_]+)_(?<specimen>[^.]+)\.tra$`}
+            placeholder="예: {material_code}/{lot}/*_{specimen}.tra"
           />
         </Field>
-        {ruleCheck && !ruleCheck.ok && <p className="mt-1 text-xs text-red-700">정규식 오류: {ruleCheck.error}</p>}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-slate-500">끼워 넣기:</span>
+          {HINT_KEYS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700 hover:border-blue-400"
+              onClick={() => insertToken(`{${k}}`)}
+              title={`{${k}}`}
+            >
+              {HINT_LABELS[k]}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="rounded border border-slate-300 bg-white px-1.5 py-0.5 font-mono text-slate-700 hover:border-blue-400"
+            onClick={() => insertToken("*")}
+            title="아무 글자(폴더 한 단계 안)"
+          >
+            *
+          </button>
+          {ruleCheck?.ok && (
+            <span className="ml-auto text-slate-400">
+              {ruleCheck.kind === "regex" ? "정규식으로 해석" : "템플릿으로 해석"}
+              {ruleCheck.keys.length > 0 && ` · 뽑는 힌트: ${ruleCheck.keys.join(", ")}`}
+            </span>
+          )}
+        </div>
+        {ruleCheck && !ruleCheck.ok && <p className="mt-1 text-xs text-red-700">규칙 오류: {ruleCheck.error}</p>}
         {ruleCheck?.ok && ruleCheck.unknownGroups.length > 0 && (
           <p className="mt-1 text-xs text-amber-700">
-            힌트가 아닌 그룹 이름: {ruleCheck.unknownGroups.join(", ")} — 서버가 무시합니다
+            힌트가 아닌 자리 이름: {ruleCheck.unknownGroups.join(", ")} — 서버가 무시합니다. 쓸 수 있는 이름:{" "}
+            {HINT_KEYS.join(", ")}
+          </p>
+        )}
+        {ruleCheck?.ok && ruleCheck.keys.length === 0 && (
+          <p className="mt-1 text-xs text-amber-700">
+            규칙에 힌트 자리가 없습니다 — 이대로면 아무것도 안 뽑습니다. 바뀌는 부분을 골라 위 단추를 누르세요.
+          </p>
+        )}
+        {names.length === 0 && s.path && (
+          <p className="mt-3 text-xs text-slate-400">
+            이 폴더에 보낼 파일이 없습니다(확장자·하위 폴더 설정 기준). 규칙은 파일이 있을 때 미리보기로 맞추세요.
           </p>
         )}
         {names.length > 0 && (
           <div className="mt-3">
             <div className="mb-1 flex items-center justify-between text-xs font-medium text-slate-600">
-              <span>미리보기 — 폴더의 파일 {names.length}개</span>
+              <span>
+                미리보기 — 보낼 파일 {names.length}개{s.recursive && " (하위 폴더 포함, 폴더마다 골고루)"}
+                {rule && matched < names.length && (
+                  <span className="ml-2 font-normal text-amber-700">
+                    규칙에 맞는 것 {matched} / {names.length}
+                  </span>
+                )}
+              </span>
               {resolved && (
                 <span className="font-normal text-slate-500">
                   MatNexus 대조: 자동 등록 {resolved.filter((r) => r.outcome === "unique").length} / {resolved.length}
@@ -311,15 +409,27 @@ export function SourceEditor({
             <table className="w-full text-xs">
               <thead className="text-left text-slate-400">
                 <tr>
-                  <th className="py-1 font-normal">파일</th>
+                  <th className="py-1 font-normal">경로 (누르면 규칙 칸에 올립니다)</th>
                   <th className="font-normal">힌트</th>
                   {resolved && <th className="font-normal">MatNexus 대조</th>}
                 </tr>
               </thead>
               <tbody>
-                {preview.map(({ n, hints }, i) => (
+                {preview.map(({ n, hints, hit }, i) => (
                   <tr key={n} className="border-t border-slate-100 align-top">
-                    <td className="py-1 font-mono">{n}</td>
+                    <td className="py-1 font-mono">
+                      <button
+                        type="button"
+                        className="text-left hover:text-blue-700 hover:underline"
+                        title="이 경로를 규칙 칸에 올립니다"
+                        onClick={() => {
+                          setRule(n);
+                          requestAnimationFrame(() => ruleInput.current?.focus());
+                        }}
+                      >
+                        {n}
+                      </button>
+                    </td>
                     <td className="text-slate-600">
                       {Object.keys(hints).length
                         ? Object.entries(hints)
@@ -328,6 +438,9 @@ export function SourceEditor({
                         : rule
                           ? "— 규칙에 안 맞음"
                           : ""}
+                      {rule && !hit && Object.keys(hints).length > 0 && (
+                        <span className="ml-1 text-amber-700">(규칙에 안 맞음 — 기본값만)</span>
+                      )}
                     </td>
                     {resolved && (
                       <td>

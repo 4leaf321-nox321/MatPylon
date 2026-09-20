@@ -18,17 +18,19 @@ export const SourceSchema = z.object({
   recursive: z.boolean().default(false),
   /** 이 시간 동안 mtime·크기가 안 변해야 "쓰기가 끝났다" 로 본다. */
   stableMinutes: z.number().int().min(0).max(1440).default(2),
-  /** 파일명 → 힌트. 이름 있는 그룹(`(?<material_code>...)`)만 뜻이 있다. */
-  filenameRule: z.string().nullable().default(null),
-  /** 소스 기본값 — "이 폴더 파일은 전부 이 재료·로트". 파일명에 없는 힌트를 채운다.
-   * 장비는 대개 시편 번호만 적는다. 파일명 규칙이 뽑은 값이 있으면 그쪽이 이긴다. */
+  /** 소스 기준 상대경로 → 힌트. 템플릿(`{material_code}/{lot}/*_{specimen}.tra`) 또는
+   * 이름 있는 그룹이 있는 정규식. 문법은 `hints.ts`. */
+  pathRule: z.string().nullable().default(null),
+  /** 소스 기본값 — "이 폴더 파일은 전부 이 재료·로트". 경로에 없는 힌트를 채운다.
+   * 장비는 대개 시편 번호만 적는다. 경로 규칙이 뽑은 값이 있으면 그쪽이 이긴다. */
   defaults: z
     .object({
       material_code: z.string().nullable().default(null),
       lot: z.string().nullable().default(null),
     })
     .default({}),
-  /** 보낸 뒤 원본을 옮길 하위 폴더 이름. null 이면 제자리(기본, 결정 D). */
+  /** 보낸 뒤 원본을 옮길 소스 루트 바로 아래 폴더 이름. 원래 폴더 구조를 그 아래에 그대로
+   * 미러링한다(`sent\SUS304\LotA\01.tra`). null 이면 제자리(기본, 결정 D). */
   moveAfterSendTo: z.string().nullable().default(null),
   enabled: z.boolean().default(true),
 });
@@ -76,8 +78,20 @@ export function defaultConfig(): Config {
 
 export class ConfigError extends Error {}
 
+/** v0.1.7 까지의 `filenameRule` → `pathRule`. 하위 폴더 없는 소스는 상대경로 = 파일명이라
+ * 뜻이 같고, 정규식이라 문법도 같다. 조용히 버리면 규칙이 사라진 채 파일럿에 나간다. */
+function migrateLegacy(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { sources?: unknown }).sources)) return raw;
+  const sources = (raw as { sources: unknown[] }).sources.map((s) => {
+    if (!s || typeof s !== "object" || !("filenameRule" in s)) return s;
+    const { filenameRule, ...rest } = s as { filenameRule?: unknown; pathRule?: unknown };
+    return { ...rest, pathRule: rest.pathRule ?? filenameRule ?? null };
+  });
+  return { ...(raw as object), sources };
+}
+
 export function parseConfig(raw: unknown): Config {
-  const result = ConfigSchema.safeParse(raw);
+  const result = ConfigSchema.safeParse(migrateLegacy(raw));
   if (result.success) {
     const keys = result.data.sources.map((s) => s.key);
     const dup = keys.find((k, i) => keys.indexOf(k) !== i);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SourceSchema } from "@engine/config";
 import { Ledger } from "@engine/ledger";
-import { scanSource } from "@engine/scanner";
+import { previewPaths, scanSource } from "@engine/scanner";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
@@ -77,16 +77,42 @@ describe("scanner", () => {
     write(f, "x", T0);
     mkdirSync(path.join(dir, "sub"));
     mkdirSync(path.join(dir, "sent"));
+    // 깊은 곳의 `sent` 는 우연히 이름이 같은 재료·로트 폴더다 — 건너뛰는 것은 루트의 것뿐
+    mkdirSync(path.join(dir, "sub", "sent"));
     write(path.join(dir, "sub", "b.tra"), "y", T0);
+    write(path.join(dir, "sub", "sent", "d.tra"), "w", T0);
     write(path.join(dir, "sent", "c.tra"), "z", T0);
 
     expect((await scanSource(source, ledger, T0)).observed).toBe(1);
     const rec = { ...source, recursive: true, moveAfterSendTo: "sent" };
-    expect((await scanSource(rec, ledger, T0 + 2 * MIN)).observed).toBe(2);
+    expect((await scanSource(rec, ledger, T0 + 2 * MIN)).observed).toBe(3);
 
     unlinkSync(f);
     const r = await scanSource(rec, ledger, T0 + 3 * MIN);
     expect(r.gone).toBe(1);
     expect(ledger.get("src", f)?.status).toBe("gone");
+  });
+});
+
+describe("미리보기 경로", () => {
+  it("스캔과 같은 눈(재귀·확장자·건너뛰는 폴더)으로 보고, 폴더마다 돌아가며 뽑는다", () => {
+    const { dir, source } = setup();
+    for (const d of ["SUS304/LotA", "AL6061/LotB", "sent"]) mkdirSync(path.join(dir, d), { recursive: true });
+    for (let i = 0; i < 30; i++) write(path.join(dir, "SUS304/LotA", `t_${i}.tra`), "x", T0);
+    write(path.join(dir, "AL6061/LotB", "t_1.tra"), "x", T0);
+    write(path.join(dir, "AL6061/LotB", "readme.txt"), "x", T0);
+    write(path.join(dir, "sent", "old.tra"), "x", T0);
+    write(path.join(dir, "top.tra"), "x", T0);
+
+    // 하위 폴더를 안 보면 최상위만
+    expect(previewPaths({ ...source, extensions: [".tra"] }, 20)).toEqual(["top.tra"]);
+
+    const rec = previewPaths({ ...source, recursive: true, extensions: [".tra"], moveAfterSendTo: "sent" }, 20);
+    expect(rec).toHaveLength(20);
+    expect(rec).toContain("AL6061/LotB/t_1.tra"); // 30개짜리 폴더에 밀려 안 보이면 규칙이 그 폴더에서 틀린다
+    expect(rec).toContain("top.tra");
+    expect(rec.some((p) => p.startsWith("sent/"))).toBe(false);
+    expect(rec.some((p) => p.endsWith(".txt"))).toBe(false);
+    expect(rec.every((p) => !p.includes("\\"))).toBe(true);
   });
 });

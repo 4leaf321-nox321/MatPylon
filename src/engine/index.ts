@@ -14,7 +14,7 @@ import { mkdirSync, renameSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { EngineStatus } from "@shared/ipc";
 import { loadConfig, saveConfig, type Config } from "./config";
-import { extractHints, mergeHints } from "./hints";
+import { extractHints, mergeHints, toRelativePath } from "./hints";
 import { Ledger, type FileRow } from "./ledger";
 import { scanSource } from "./scanner";
 import { nextRunAt } from "./scheduler";
@@ -263,7 +263,7 @@ export class Engine extends EventEmitter {
       path: row.path,
       sha256: row.sha256!,
       mtimeMs: row.mtime_ms,
-      hints: mergeHints(source.defaults, extractHints(source.filenameRule, path.basename(row.path))),
+      hints: mergeHints(source.defaults, extractHints(source.pathRule, toRelativePath(source.path, row.path))),
     });
     switch (result.kind) {
       case "sent":
@@ -320,10 +320,16 @@ export class Engine extends EventEmitter {
     }
   }
 
-  /** 결정 D: 옮기는 것은 `sent` 가 된 뒤에만, 옵션이 켜진 소스만. */
+  /** 결정 D: 옮기는 것은 `sent` 가 된 뒤에만, 옵션이 켜진 소스만.
+   *
+   * 소스 루트의 `sent\` 아래에 **원래 폴더 구조 그대로** 옮긴다 —
+   * `SUS304\LotA\01.tra` → `sent\SUS304\LotA\01.tra`. 원본 트리에는 아직 안 보낸 것만 남아
+   * 현장에서 한눈에 보이고, 보낸 것은 한 곳에 모여 보관·삭제가 쉽다. 복사가 아니라 이동(rename)
+   * 이다 — 같은 볼륨이라 네트워크 드라이브에서도 즉시다. */
   private moveSent(file: string, source: { path: string; moveAfterSendTo: string | null }): void {
     try {
-      const dir = path.join(path.dirname(file), source.moveAfterSendTo!);
+      const rel = path.relative(source.path, file);
+      const dir = path.join(source.path, source.moveAfterSendTo!, path.dirname(rel));
       mkdirSync(dir, { recursive: true });
       let target = path.join(dir, path.basename(file));
       if (existsSync(target)) {

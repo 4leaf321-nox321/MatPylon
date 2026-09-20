@@ -68,7 +68,11 @@ function* walk(
   for (const e of entries) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (recursive && e.name !== skipDir) yield* walk(full, true, skipDir, failed);
+      // 보낸 파일 폴더는 소스 루트 바로 아래 하나뿐이다(`moveSent` 가 구조를 그 아래에
+      // 그대로 미러링한다). 그래서 루트에서만 건너뛴다 — 깊은 곳에 같은 이름의 재료·로트
+      // 폴더가 있어도 잡아먹지 않는다.
+      if (e.name === skipDir) continue;
+      if (recursive) yield* walk(full, true, null, failed);
     } else if (e.isFile()) {
       yield full;
     }
@@ -137,4 +141,32 @@ export async function scanSource(
     result.gone++;
   }
   return result;
+}
+
+/** 규칙 편집기의 미리보기용 — 스캔과 같은 눈(재귀·건너뛰는 폴더·확장자)으로 본 상대경로.
+ *
+ * 폴더마다 돌아가며 뽑는다. 하위 폴더가 재료별이면 앞에서 20개를 끊었을 때 첫 폴더만
+ * 보이고, 그 규칙은 둘째 폴더에서 틀린다. 큰 트리는 중간에 멈춘다 — 미리보기다. */
+export function previewPaths(
+  source: Pick<Source, "path" | "recursive" | "extensions" | "moveAfterSendTo">,
+  limit: number,
+): string[] {
+  const byDir = new Map<string, string[]>();
+  let seen = 0;
+  for (const file of walk(source.path, source.recursive, source.moveAfterSendTo, [])) {
+    const ext = path.extname(file).toLowerCase();
+    if (source.extensions.length && !source.extensions.includes(ext)) continue;
+    const dir = path.dirname(file);
+    const list = byDir.get(dir) ?? [];
+    if (list.length < limit) {
+      list.push(path.relative(source.path, file).split(path.sep).join("/"));
+      byDir.set(dir, list);
+    }
+    if (++seen >= 5000 || byDir.size >= 200) break;
+  }
+  const out: string[] = [];
+  const groups = [...byDir.values()];
+  for (let i = 0; out.length < limit && groups.some((g) => i < g.length); i++)
+    for (const g of groups) if (i < g.length && out.length < limit) out.push(g[i]!);
+  return out;
 }
