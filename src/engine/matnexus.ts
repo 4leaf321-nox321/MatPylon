@@ -7,7 +7,7 @@
  * `fetch` 는 Node 내장이 아니라 undici 패키지의 것이다. 내장 fetch 는 TLS 옵션을
  * 못 받는데, 사내망 HTTPS 는 자체 서명 인증서가 흔하다. */
 
-import { openAsBlob, readFileSync } from "node:fs";
+import { existsSync, openAsBlob, readFileSync } from "node:fs";
 import path from "node:path";
 import { Agent, fetch as undiciFetch, type Dispatcher, type RequestInit } from "undici";
 import type { SecretStore } from "./secrets";
@@ -116,14 +116,18 @@ export interface ClientOptions {
   connectorId: string | null;
   tls?: TlsOptions;
   timeoutMs?: number;
+  /** 파일 업로드만 따로. 느린 사내망에서 큰 파일은 60초를 넘는다 — 넘으면 영영 못 보낸다. */
+  uploadTimeoutMs?: number;
 }
 
 export class MatNexusClient implements Transport {
   private readonly timeoutMs: number;
+  private readonly uploadTimeoutMs: number;
   private readonly dispatcher: Dispatcher | undefined;
 
   constructor(private readonly options: ClientOptions) {
     this.timeoutMs = options.timeoutMs ?? 60_000;
+    this.uploadTimeoutMs = options.uploadTimeoutMs ?? options.timeoutMs ?? 30 * 60_000;
     this.dispatcher = makeDispatcher(options.tls);
   }
 
@@ -147,9 +151,10 @@ export class MatNexusClient implements Transport {
     p: string,
     body?: RequestInit["body"],
     json = true,
+    timeoutMs = this.timeoutMs,
   ): Promise<T> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await undiciFetch(this.url(p), {
         method,
@@ -216,8 +221,19 @@ export class MatNexusClient implements Transport {
   }
 
   /** 파일 1 = 요청 1. `openAsBlob` 은 파일을 읽지 않고 Blob 을 만든다 — 본문을 보낼
-   * 때 스트림으로 읽는다. 큰 파일이 메모리에 통째로 오르지 않는다. */
+   * 때 스트림으로 읽는다. 큰 파일이 메모리에 통째로 오르지 않는다.
+   *
+   * **파일 여는 것부터 try 안이다.** 스캔에서 보낼 때까지 최대 스캔 주기만큼 틈이 있고,
+   * 그 사이 사람이 파일을 지우거나 장비 SW 가 다시 잠글 수 있다. 여기서 예외가 나가면
+   * 엔진의 배치가 통째로 멈추고 그 행은 `sending` 에 갇힌다(실측). */
   async deliver(item: Delivery): Promise<DeliveryResult> {
+    let blob;
+    try {
+      blob = await openAsBlob(item.path);
+    } catch (e) {
+      return classifyOpen(e, item.path);
+    }
+
     const form = new FormData();
     form.set("connector_id", this.options.connectorId ?? "");
     form.set("source_key", item.sourceKey);
@@ -226,10 +242,11 @@ export class MatNexusClient implements Transport {
     form.set("mtime", new Date(item.mtimeMs).toISOString());
     form.set("hints", JSON.stringify(item.hints));
     // 서버 규약: file 은 마지막 파트여야 스트리밍이 된다.
-    form.set("file", await openAsBlob(item.path), path.basename(item.path));
+    form.set("file", blob, path.basename(item.path));
 
     try {
-      const out = await this.request<InboxItemOut>("POST", "/pipelines/inbox", form, false);
+      // 업로드는 제어 요청보다 오래 걸린다 — 같은 60초를 걸면 큰 파일은 영영 못 간다.
+      const out = await this.request<InboxItemOut>("POST", "/pipelines/inbox", form, false, this.uploadTimeoutMs);
       return { kind: "sent", serverId: out.id };
     } catch (e) {
       return classify(e);
@@ -259,6 +276,23 @@ async function parseError(res: { json(): Promise<unknown> }): Promise<ServerErro
 
 /** 해시 불일치 — 전송 중 깨진 것. 한 번은 다시 보내 본다(원장이 횟수를 센다). */
 export const HASH_MISMATCH = "MNX-PIPE-0003";
+
+/** 보내려고 파일을 여는 데 실패했다. **없어진 것과 잠긴 것은 다르다** —
+ * 없어졌으면 다시 봐야 소용없으니 사람에게 보이고, 잠긴 것은 장비가 놓으면 된다.
+ *
+ * `openAsBlob` 은 둘을 구별해 주지 않는다: 어느 쪽이든 동기로 던지는
+ * `TypeError: Unable to open file as blob`(code `ERR_INVALID_ARG_VALUE`)뿐이라 errno 가 없다.
+ * 그래서 파일이 아직 있는지 직접 본다. */
+export function classifyOpen(e: unknown, file: string): DeliveryResult {
+  const code = (e as NodeJS.ErrnoException).code ?? (e as { cause?: { code?: string } }).cause?.code;
+  const missing = code === "ENOENT" || code === "ENOTDIR" || !existsSync(file);
+  if (missing)
+    return { kind: "rejected", error: "보내기 직전에 파일이 없어졌습니다(지웠거나 옮겼습니다)" };
+  return {
+    kind: "retry",
+    error: "파일을 열지 못했습니다 — 장비가 아직 쓰고 있거나 권한이 없습니다",
+  };
+}
 
 /** HTTP 결과 → 원장이 아는 넷. 규칙은 개발계획 §5.3. */
 export function classify(e: unknown): DeliveryResult {

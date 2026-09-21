@@ -2,8 +2,8 @@
  *
  * "지금 보내기를 눌렀는데 0/0/0 이고 「쓰는 중?」 이라 얼마나 기다려야 할지 모르겠다" 는
  * 실제 사용에서 나온 말이다. 그 줄이 사라지면 같은 일이 다시 난다. */
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/renderer/pages/Dashboard";
 import { installApi } from "./harness";
 
@@ -37,5 +37,12 @@ describe("대시보드", () => {
     installApi({}, { status: { lastError: "폴더를 읽지 못했습니다 — \\\\nas\\share" } });
     render(<Dashboard />);
     expect(await screen.findByText(/폴더를 읽지 못했습니다/)).toBeTruthy();
+  });
+
+  it("「지금 보내기」가 실패하면 그 자리에서 말한다", async () => {
+    installApi({ sendNow: vi.fn(async () => { throw new Error("Error: 보내는 중 예외: EBUSY"); }) });
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByRole("button", { name: "지금 보내기" }));
+    expect(await screen.findByText("보내는 중 예외: EBUSY")).toBeTruthy();
   });
 });

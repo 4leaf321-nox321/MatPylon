@@ -8,16 +8,21 @@ export function Dashboard() {
   const { config } = useConfig();
   const [recent, setRecent] = useState<LedgerRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [sendErr, setSendErr] = useState<string | null>(null);
 
   const refresh = () => window.matpylon.listFiles().then((rows) => setRecent(rows.slice(0, 20)));
   useEffect(() => {
     void refresh();
   }, [status]);
 
+  // 눌렀는데 아무 일도 안 일어나는 것이 제일 나쁘다 — 실패하면 그 자리에서 말한다.
   const sendNow = async () => {
     setBusy(true);
+    setSendErr(null);
     try {
       await window.matpylon.sendNow();
+    } catch (e) {
+      setSendErr((e as Error).message.replace(/^.*Error: /, ""));
     } finally {
       setBusy(false);
     }
@@ -69,6 +74,12 @@ export function Dashboard() {
                   : "파일이 잠시 변하지 않아야 보냅니다"}
                 <span className="ml-1 text-xs text-slate-400">(소스의 안정화 시간 동안 파일이 안 변해야 「대기」가 됩니다)</span>
               </dd>
+            </>
+          )}
+          {sendErr && (
+            <>
+              <dt className="text-slate-500">「지금 보내기」</dt>
+              <dd className="text-red-700">{sendErr}</dd>
             </>
           )}
           {status.lastError && (

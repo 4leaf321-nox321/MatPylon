@@ -112,7 +112,14 @@ export async function scanSource(
     if (row.status !== "seen") continue;
 
     // 안정화: 마지막으로 바뀐 것을 본 시각(observed_at)과 mtime 둘 다 stableMs 이전.
-    const settled = now - Math.max(row.observed_at, st.mtimeMs) >= stableMs;
+    //
+    // **미래 mtime 은 안 믿는다.** 장비 PC·NAS 시계가 앞서 있으면(흔하다) 그 시각이 올
+    // 때까지 파일이 묶인다 — 두 시간 앞서면 두 시간. 그때는 mtime 을 버리고 `observed_at`
+    // 으로만 잰다: 이 크기·mtime 으로 처음 본 시각이고, 우리 시계라 믿을 수 있다.
+    // (`now` 로 자르면 매 스캔마다 안정화가 처음부터 다시 시작돼 영영 안 끝난다.)
+    const skewed = st.mtimeMs > now;
+    const changedAt = skewed ? row.observed_at : Math.max(row.observed_at, st.mtimeMs);
+    const settled = now - changedAt >= stableMs;
     if (!settled || !canOpen(file)) continue;
 
     try {
@@ -121,6 +128,11 @@ export async function scanSource(
       if (status === "duplicate") result.duplicate++;
       else result.ready++;
       log(`${status}: ${file}`);
+      if (skewed)
+        log(
+          `  파일 시각이 미래입니다(${new Date(st.mtimeMs).toISOString()}) — 시계가 어긋난 것으로 보고` +
+            ` 처음 본 시각으로 안정화를 판정했습니다`,
+        );
     } catch (e) {
       result.errors.push(`${file}: ${(e as Error).message}`);
     }

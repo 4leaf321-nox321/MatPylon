@@ -15,9 +15,11 @@ const dataDirArg = process.argv.find((a) => a.startsWith("--data-dir="))?.slice(
 if (dataDirArg) app.setPath("userData", dataDirArg);
 
 // 인스턴스 하나. 트레이 앱이 둘 뜨면 같은 폴더를 두 번 보낸다.
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-}
+//
+// `app.quit()` 은 곧장 끝나지 않는다 — 뒤의 `whenReady` 가 그대로 등록돼 있으면 종료가
+// 끝나기 전에 엔진·원장·트레이가 하나 더 생길 수 있다. 여기서 아예 멈춘다.
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) app.quit();
 
 log.initialize();
 log.transports.file.level = "info";
@@ -129,7 +131,7 @@ function buildTrayMenu(): void {
   );
 }
 
-app.whenReady().then(() => {
+if (singleInstance) app.whenReady().then(() => {
   // 첫 실행이면 자동 시작을 켠다 — 트레이 상주 앱이 로그인 뒤 안 떠 있으면 아무것도 안 보낸다.
   // 사용자가 「정보」에서 끄면 그 뒤로는 건드리지 않는다(설정 파일이 생기므로).
   if (Engine.isFirstRun(app.getPath("userData")) && app.isPackaged) {
@@ -172,10 +174,13 @@ app.whenReady().then(() => {
       return { ok: false, error: (e as Error).message };
     }
   });
-  ipcMain.handle(CHANNELS.registerConnector, async (_e, url: string, name: string, ws: string) => {
-    const out = await engine.client(url, null).registerConnector(name, os.hostname(), ws);
-    return { id: out.id };
-  });
+  ipcMain.handle(
+    CHANNELS.registerConnector,
+    async (_e, url: string, name: string, ws: string, tls?: { insecure: boolean; caFile: string | null }) => {
+      const out = await engine.client(url, null, tls).registerConnector(name, os.hostname(), ws);
+      return { id: out.id };
+    },
+  );
   ipcMain.handle(CHANNELS.listWorkspaces, async (_e, url: string, tls?: { insecure: boolean; caFile: string | null }) => {
     const list = await engine.client(url, null, tls).listWorkspaces();
     return list.map((w) => ({ id: w.id, name: w.name, path: w.path, is_active: w.is_active }));

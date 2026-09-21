@@ -140,15 +140,20 @@ export class Ledger {
     this.db.prepare("UPDATE files SET status = 'gone' WHERE id = ?").run(id);
   }
 
-  /** 보낼 차례인 것. `retry` 는 백오프가 지났을 때만. */
-  due(now: number, limit = 100): FileRow[] {
+  /** 보낼 차례인 것. `retry` 는 백오프가 지났을 때만.
+   *
+   * @param skipSources 꺼진 소스의 키. 「활성」을 끈 폴더는 이미 대기 중이던 것도 안 보낸다 —
+   *   SQL 에서 뺀다. 루프에서 걸러 내면 상한(100)이 꺼진 소스 행으로 차 버린다. */
+  due(now: number, limit = 100, skipSources: string[] = []): FileRow[] {
+    const holes = skipSources.map(() => "?").join(",");
     return this.db
       .prepare(
         `SELECT * FROM files
-         WHERE status = 'ready' OR (status = 'retry' AND next_attempt_at <= ?)
+         WHERE (status = 'ready' OR (status = 'retry' AND next_attempt_at <= ?))
+           ${skipSources.length ? `AND source_key NOT IN (${holes})` : ""}
          ORDER BY first_seen_at LIMIT ?`,
       )
-      .all(now, limit) as FileRow[];
+      .all(now, ...skipSources, limit) as FileRow[];
   }
 
   claim(id: number): void {

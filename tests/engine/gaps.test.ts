@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SourceSchema, defaultConfig } from "@engine/config";
 import { Engine } from "@engine/index";
 import { Ledger } from "@engine/ledger";
-import { ApiError, HASH_MISMATCH, classify } from "@engine/matnexus";
+import { ApiError, HASH_MISMATCH, MatNexusClient, classify, classifyOpen } from "@engine/matnexus";
+import { memorySecrets } from "@engine/secrets";
 import { scanSource } from "@engine/scanner";
 import type { DeliveryResult, Transport } from "@engine/transport";
 
@@ -181,6 +182,140 @@ describe("원장 정리는 하루에 한 번 다시 돈다", () => {
     now += 91 * DAY; // 앱은 계속 떠 있다 — 재시작 없이 91일
     await engine.scan();
     expect(engine.files()).toHaveLength(0);
+    engine.close();
+  });
+});
+
+// --- 2026-09-21 점검에서 실측으로 확인한 것들 ------------------------------------
+
+describe("보내기 직전에 파일이 사라지거나 잠긴 경우", () => {
+  it("transport 가 던져도 배치가 안 멈추고, 그 행이 sending 에 안 갇힌다", async () => {
+    const dataDir = tmp("matpylon-boom-");
+    const srcDir = tmp("matpylon-boom-src-");
+    let now = T0;
+    const seen: string[] = [];
+    // 첫 건에서만 던진다 — 한 건의 사고가 뒤의 파일을 막으면 안 된다
+    const transport: Transport = {
+      configured: () => true,
+      deliver: async (item) => {
+        seen.push(path.basename(item.path));
+        if (path.basename(item.path) === "a.tra") throw new TypeError("Unable to open file as blob");
+        return { kind: "sent", serverId: "x" };
+      },
+    };
+    const engine = new Engine({ appVersion: "t", dataDir, transport, now: () => now });
+    const config = defaultConfig();
+    config.sources.push(SourceSchema.parse({ key: "zwick", name: "z", path: srcDir }));
+    engine.setConfig(config);
+    write(path.join(srcDir, "a.tra"), "a");
+    write(path.join(srcDir, "b.tra"), "b");
+    await engine.scan();
+    now += 3 * MIN;
+    await engine.scan(); // 안정화 → ready
+    await engine.send(); // 던지지 않아야 한다
+
+    expect(seen).toEqual(["a.tra", "b.tra"]); // 뒤의 것도 시도했다
+    expect(engine.files("sending")).toHaveLength(0);
+    expect(engine.files("retry")).toHaveLength(1); // 던진 것은 나중에 다시
+    expect(engine.files("sent")).toHaveLength(1);
+    engine.close();
+  });
+
+  it("없어진 파일은 rejected(=failed), 잠긴 파일은 retry 로 접는다", async () => {
+    const dir = tmp("matpylon-open-");
+    const client = new MatNexusClient({
+      baseUrl: "http://127.0.0.1:9",
+      secrets: memorySecrets(),
+      connectorId: "c1",
+    });
+    const gone = await client.deliver({
+      sourceKey: "k",
+      path: path.join(dir, "없는파일.tra"),
+      sha256: "s",
+      mtimeMs: T0,
+      hints: {},
+    });
+    expect(gone.kind).toBe("rejected"); // 던지지 않는다
+
+    // openAsBlob 은 errno 를 안 준다(없어진 것도 잠긴 것도 ERR_INVALID_ARG_VALUE) —
+    // 파일이 아직 있는지로 가른다
+    const here = path.join(dir, "있는파일.tra");
+    write(here, "x");
+    expect(classifyOpen(new TypeError("Unable to open file as blob"), here).kind).toBe("retry");
+    expect(classifyOpen(new TypeError("Unable to open file as blob"), path.join(dir, "없다.tra")).kind).toBe(
+      "rejected",
+    );
+  });
+});
+
+describe("「활성」을 끈 소스", () => {
+  it("이미 대기 중이던 것도 보내지 않는다", async () => {
+    const dataDir = tmp("matpylon-off-");
+    const srcDir = tmp("matpylon-off-src-");
+    let now = T0;
+    const seen: string[] = [];
+    const transport: Transport = {
+      configured: () => true,
+      deliver: async (item) => {
+        seen.push(path.basename(item.path));
+        return { kind: "sent", serverId: "x" };
+      },
+    };
+    const engine = new Engine({ appVersion: "t", dataDir, transport, now: () => now });
+    const config = defaultConfig();
+    config.sources.push(SourceSchema.parse({ key: "zwick", name: "z", path: srcDir }));
+    engine.setConfig(config);
+    write(path.join(srcDir, "a.tra"), "a");
+    await engine.scan();
+    now += 3 * MIN;
+    await engine.scan(); // ready 까지 간 뒤에 끈다
+    expect(engine.files("ready")).toHaveLength(1);
+
+    const c = engine.getConfig();
+    engine.setConfig({ ...c, sources: c.sources.map((s) => ({ ...s, enabled: false })) });
+    await engine.send();
+    expect(seen).toEqual([]);
+    expect(engine.files("ready")).toHaveLength(1); // 큐에 그대로 남는다
+
+    // 다시 켜면 그대로 나간다
+    engine.setConfig(engine.getConfig().sources.length ? { ...c, sources: c.sources.map((s) => ({ ...s, enabled: true })) } : c);
+    await engine.send();
+    expect(seen).toEqual(["a.tra"]);
+    engine.close();
+  });
+});
+
+describe("장비 PC·NAS 시계가 앞선 파일", () => {
+  it("미래 mtime 을 기다리지 않는다 — 처음 본 시각으로 잰다", async () => {
+    const dir = tmp("matpylon-skew-");
+    const f = path.join(dir, "future.tra");
+    write(f, "x", T0 + 2 * 3600_000); // 두 시간 앞선 파일
+    const source = SourceSchema.parse({ key: "skew", name: "s", path: dir, stableMinutes: 1 });
+    const ledger = new Ledger(":memory:");
+    await scanSource(source, ledger, T0);
+    const r = await scanSource(source, ledger, T0 + 2 * MIN);
+    expect(r.ready).toBe(1);
+    expect(ledger.get("skew", f)?.status).toBe("ready");
+  });
+});
+
+describe("오류는 스캔과 전송을 갈라 센다", () => {
+  it("heartbeat 가 성공해도 「폴더를 읽지 못했습니다」는 안 지워진다", async () => {
+    const dataDir = tmp("matpylon-err-");
+    const now = T0;
+    const engine = new Engine({
+      appVersion: "t",
+      dataDir,
+      transport: { configured: () => true, deliver: async () => ({ kind: "sent", serverId: "x" }) },
+      now: () => now,
+    });
+    const config = defaultConfig();
+    config.sources.push(SourceSchema.parse({ key: "nas", name: "nas", path: path.join(tmpdir(), "없는폴더-" + T0) }));
+    engine.setConfig(config);
+    await engine.scan();
+    expect(engine.status().lastError).toContain("폴더를 읽지 못했습니다");
+    await engine.send(); // 전송 쪽은 멀쩡하다
+    expect(engine.status().lastError).toContain("폴더를 읽지 못했습니다");
     engine.close();
   });
 });

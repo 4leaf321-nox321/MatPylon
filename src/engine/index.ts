@@ -20,7 +20,7 @@ import { scanSource } from "./scanner";
 import { nextRunAt } from "./scheduler";
 import { HASH_MISMATCH, MatNexusClient } from "./matnexus";
 import { memorySecrets, type SecretStore } from "./secrets";
-import { noTransport, type Transport } from "./transport";
+import { noTransport, type DeliveryResult, type Transport } from "./transport";
 
 /** 폴더를 못 읽었을 때의 말머리. 화면 오류를 걷을 때 이것으로 알아본다. */
 const UNREADABLE = "폴더를 읽지 못했습니다";
@@ -55,7 +55,11 @@ export class Engine extends EventEmitter {
   private sendTimer: NodeJS.Timeout | null = null;
   private lastSendAt: number | null = null;
   private lastPruneAt = 0;
-  private lastError: string | null = null;
+  /** 오류는 두 갈래다. 스캔(폴더를 못 읽음)과 전송(토큰·서버). 한 칸에 담으면 전송이
+   * 성공할 때마다 「드라이브가 끊겼다」가 지워지고, 다음 스캔이 다시 세워 같은 알림이
+   * 주기마다 다시 뜬다(실측). 각자 자기 것만 세우고 자기 것만 지운다. */
+  private scanError: string | null = null;
+  private sendError: string | null = null;
   /** heartbeat 가 알려 준 서버 한도. 모르면 null — 그냥 보내고 413 을 받는다. */
   private uploadLimit: number | null = null;
   private nextSendAt: number | null = null;
@@ -176,11 +180,10 @@ export class Engine extends EventEmitter {
     }
     // 폴더가 안 읽히면 수집이 통째로 멈춘다. 조용히 지나가면 아무도 모른 채 며칠이 간다 —
     // 화면과 트레이 알림에 띄운다. 다시 읽히면 스스로 걷는다.
-    if (unreadable) this.lastError = unreadable;
-    else if (this.lastError?.includes(UNREADABLE)) this.lastError = null;
+    this.scanError = unreadable;
     this.armRescan();
     // 「지금 보내기」가 쓰는 중인 파일에 막혀 있었다면, 대기로 넘어온 지금 이어서 보낸다.
-    if (this.sendAfterStabilize && this.ledger.due(this.now()).length > 0) {
+    if (this.sendAfterStabilize && this.ledger.due(this.now(), 1, this.disabledSources()).length > 0) {
       this.sendAfterStabilize = false;
       void this.send();
       return;
@@ -198,7 +201,11 @@ export class Engine extends EventEmitter {
       if (!source.enabled) continue;
       for (const row of this.ledger.pendingBySource(source.key)) {
         if (row.status !== "seen") continue;
-        const at = Math.max(row.observed_at, row.mtime_ms) + source.stableMinutes * 60_000;
+        // 미래 mtime 은 버리고 처음 본 시각으로 — 스캐너의 안정화 판정과 같은 셈이어야
+        // 화면의 「몇 시쯤 넘어옵니다」가 실제와 맞는다.
+        const changedAt =
+          row.mtime_ms > this.now() ? row.observed_at : Math.max(row.observed_at, row.mtime_ms);
+        const at = changedAt + source.stableMinutes * 60_000;
         if (earliest === null || at < earliest) earliest = at;
       }
     }
@@ -219,7 +226,7 @@ export class Engine extends EventEmitter {
         this.log("서버가 설정되지 않아 보내지 않습니다");
         return;
       }
-      for (const row of this.ledger.due(this.now())) {
+      for (const row of this.ledger.due(this.now(), 100, this.disabledSources())) {
         const halted = await this.deliverOne(row);
         if (halted) break;
       }
@@ -229,6 +236,12 @@ export class Engine extends EventEmitter {
       if (this.running) this.arm();
       this.emitStatus();
     }
+  }
+
+  /** 「활성」이 꺼진 소스의 키. 설정에 아예 없는 소스는 여기 없다 — 그건 보내려다
+   * `설정에 없는 소스입니다` 로 실패시켜 사람에게 보여야 한다. */
+  private disabledSources(): string[] {
+    return this.config.sources.filter((s) => !s.enabled).map((s) => s.key);
   }
 
   async sendNow(): Promise<void> {
@@ -258,13 +271,20 @@ export class Engine extends EventEmitter {
       return false;
     }
     this.ledger.claim(row.id);
-    const result = await this.transport.deliver({
-      sourceKey: row.source_key,
-      path: row.path,
-      sha256: row.sha256!,
-      mtimeMs: row.mtime_ms,
-      hints: mergeHints(source.defaults, extractHints(source.pathRule, toRelativePath(source.path, row.path))),
-    });
+    // transport 가 던지면 배치가 통째로 멈추고 이 행은 `sending` 에 갇힌다 — 한 건의
+    // 사고가 큐 전체를 세우지 않게 여기서 받는다. 구현을 믿지 않는 것이 경계의 일이다.
+    let result: DeliveryResult;
+    try {
+      result = await this.transport.deliver({
+        sourceKey: row.source_key,
+        path: row.path,
+        sha256: row.sha256!,
+        mtimeMs: row.mtime_ms,
+        hints: mergeHints(source.defaults, extractHints(source.pathRule, toRelativePath(source.path, row.path))),
+      });
+    } catch (e) {
+      result = { kind: "retry", error: `보내는 중 예외: ${(e as Error).message}` };
+    }
     switch (result.kind) {
       case "sent":
         this.ledger.markSent(row.id, result.serverId, this.now());
@@ -287,7 +307,7 @@ export class Engine extends EventEmitter {
         break;
       case "halt":
         this.ledger.markRetry(row.id, result.error, this.now());
-        this.lastError = result.error;
+        this.sendError = result.error;
         this.log(`전송 중단: ${result.error}`);
         return true;
     }
@@ -313,10 +333,11 @@ export class Engine extends EventEmitter {
         next_run_at: this.nextSendAt ? new Date(this.nextSendAt).toISOString() : null,
       });
       if (typeof out.upload_limit_bytes === "number") this.uploadLimit = out.upload_limit_bytes;
-      this.lastError = null;
+      // 서버와 말이 통했다 — 전송 쪽 오류만 걷는다. 폴더를 못 읽는 것은 그대로 둔다.
+      this.sendError = null;
     } catch (e) {
-      this.lastError = `heartbeat 실패: ${(e as Error).message}`;
-      this.log(this.lastError);
+      this.sendError = `heartbeat 실패: ${(e as Error).message}`;
+      this.log(this.sendError);
     }
   }
 
@@ -357,7 +378,8 @@ export class Engine extends EventEmitter {
       appVersion: this.options.appVersion,
       running: this.running,
       serverConfigured: this.transport.configured(),
-      lastError: this.lastError,
+      // 스캔 오류가 먼저다 — 폴더를 못 읽으면 보낼 것 자체가 안 쌓인다.
+      lastError: this.scanError ?? this.sendError,
       nextRunAt: this.running && this.nextSendAt ? new Date(this.nextSendAt).toISOString() : null,
       counts: { seen: c.seen, ready: c.ready + c.retry, sent: c.sent, failed: c.failed },
       stabilizingUntil: this.stabilizingUntil ? new Date(this.stabilizingUntil).toISOString() : null,

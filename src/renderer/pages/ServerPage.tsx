@@ -78,7 +78,8 @@ export function ServerForm({
     setBusy(true);
     setMsg(null);
     try {
-      const { id } = await window.matpylon.registerConnector(url.trim(), connectorName, workspaceId.trim());
+      // 저장 전 화면의 TLS 로 등록한다 — 「연결 확인」과 같은 조건이어야 한다.
+      const { id } = await window.matpylon.registerConnector(url.trim(), connectorName, workspaceId.trim(), tls);
       const err = await onSaved({
         ...config,
         server: { url: url.trim(), connectorId: id, connectorName, tls },

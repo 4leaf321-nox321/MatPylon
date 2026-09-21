@@ -78,7 +78,14 @@ export interface MatPylonApi {
   setToken(token: string | null): Promise<void>;
   /** 저장 전에 URL·토큰으로 /auth/me 를 불러 본다. */
   testConnection(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<ConnectionCheck>;
-  registerConnector(url: string, name: string, workspaceId: string): Promise<{ id: string }>;
+  /** `tls` 는 저장 전 화면의 값이다 — 안 넘기면 저장된 설정으로 검증해서, 자체 서명
+   * 인증서 폐쇄망에서 「연결 확인」은 되고 등록만 실패한다. */
+  registerConnector(
+    url: string,
+    name: string,
+    workspaceId: string,
+    tls?: { insecure: boolean; caFile: string | null },
+  ): Promise<{ id: string }>;
   /** 토큰 주인이 속한 부서 목록. 연결 확인 뒤 마법사가 고르게 한다. */
   listWorkspaces(url: string, tls?: { insecure: boolean; caFile: string | null }): Promise<WorkspaceItem[]>;
   /** 저장된 서버 설정으로. 서버가 없거나 엔드포인트가 없으면(404) null. */
