@@ -19,13 +19,17 @@ export interface ScanResult {
   unreadable: boolean;
 }
 
+/** `end` 가 아니라 `close` 에서 끝낸다 — **`end` 시점엔 파일 핸들이 아직 열려 있다.**
+ * Windows 는 열린 핸들이 남은 파일을 지우면 「지우는 중」 상태로 두고, 그 자리에 같은
+ * 이름을 다시 만들려 하면 EPERM 을 낸다. 해시 직후에 옮기거나 지우는 길이 있으므로
+ * (보낸 뒤 이동, 사람이 치움) 핸들이 확실히 닫힌 뒤에 넘긴다. CI 에서 실제로 터졌다. */
 export function sha256File(file: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
     createReadStream(file)
       .on("data", (chunk) => hash.update(chunk))
       .on("error", reject)
-      .on("end", () => resolve(hash.digest("hex")));
+      .on("close", () => resolve(hash.digest("hex")));
   });
 }
 
