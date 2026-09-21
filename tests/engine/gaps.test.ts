@@ -319,3 +319,61 @@ describe("오류는 스캔과 전송을 갈라 센다", () => {
     engine.close();
   });
 });
+
+describe("「무시」 — 실패를 닫는 길", () => {
+  it("실패 수에서 빠지고, 이력에는 사유가 남는다", () => {
+    const l = new Ledger(":memory:");
+    const a = l.observe("s", "a", 1, T0, T0);
+    l.markReady(a.id, "h1");
+    l.claim(a.id);
+    l.markFailed(a.id, "MNX-PIPE-0002: 형식을 알 수 없습니다");
+    expect(l.counts().failed).toBe(1);
+
+    l.dismiss(a.id);
+    expect(l.counts().failed).toBe(0); // 대시보드의 빨간 숫자가 걷힌다
+    const row = l.get("s", "a")!;
+    expect(row.status).toBe("dismissed");
+    expect(row.last_error).toContain("형식을 알 수 없습니다"); // 왜 무시했는지가 남는다
+    expect(l.sourceStats("s").failed).toBe(0); // heartbeat 에도 안 실린다
+  });
+
+  it("재시도 대기 중인 것도 닫을 수 있고, 「다시 시도」로 되살아난다", () => {
+    const l = new Ledger(":memory:");
+    const a = l.observe("s", "a", 1, T0, T0);
+    l.markReady(a.id, "h1");
+    l.claim(a.id);
+    l.markRetry(a.id, "네트워크", T0);
+    l.dismiss(a.id);
+    expect(l.get("s", "a")!.status).toBe("dismissed");
+    expect(l.due(T0 + 99 * MIN)).toHaveLength(0); // 더 안 보낸다
+
+    l.requeue(a.id);
+    expect(l.get("s", "a")!.status).toBe("ready");
+    expect(l.due(T0 + 99 * MIN)).toHaveLength(1);
+  });
+
+  it("끝난 것(보냄)은 무시로 바뀌지 않는다", () => {
+    const l = new Ledger(":memory:");
+    const a = l.observe("s", "a", 1, T0, T0);
+    l.markReady(a.id, "h1");
+    l.markSent(a.id, "srv-1", T0);
+    l.dismiss(a.id);
+    expect(l.get("s", "a")!.status).toBe("sent");
+  });
+
+  it("무시한 것은 보존 기간 뒤 정리된다 — failed 는 아직 사람이 안 본 것이라 남는다", () => {
+    const l = new Ledger(":memory:");
+    const a = l.observe("s", "a", 1, T0, T0);
+    l.markReady(a.id, "h1");
+    l.claim(a.id);
+    l.markFailed(a.id, "x");
+    l.dismiss(a.id);
+    const b = l.observe("s", "b", 1, T0, T0);
+    l.markReady(b.id, "h2");
+    l.claim(b.id);
+    l.markFailed(b.id, "y");
+
+    expect(l.prune(T0 + 10 * DAY)).toBe(1);
+    expect(l.list().map((r) => r.path)).toEqual(["b"]);
+  });
+});

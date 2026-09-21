@@ -9,6 +9,7 @@ const FILTERS = [
   ["ready", "대기"],
   ["retry", "재시도 대기"],
   ["failed", "실패"],
+  ["dismissed", "무시함"],
   ["sent", "보냄"],
   ["duplicate", "중복"],
   ["seen", "쓰는 중"],
@@ -95,8 +96,22 @@ export function HistoryPage() {
                     {r.last_error}
                     {r.attempts > 1 && <span className="text-slate-400"> ({r.attempts}회)</span>}
                   </td>
-                  <td>
+                  <td className="whitespace-nowrap">
                     {(r.status === "failed" || r.status === "retry") && (
+                      <>
+                        <Button variant="ghost" onClick={() => window.matpylon.requeue(r.id).then(load)}>
+                          다시 시도
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          title="못 보내는 것으로 보고 닫습니다. 실패 수에서 빠지고, 나중에 「다시 시도」로 되살릴 수 있습니다"
+                          onClick={() => window.matpylon.dismiss(r.id).then(load)}
+                        >
+                          무시
+                        </Button>
+                      </>
+                    )}
+                    {r.status === "dismissed" && (
                       <Button variant="ghost" onClick={() => window.matpylon.requeue(r.id).then(load)}>
                         다시 시도
                       </Button>

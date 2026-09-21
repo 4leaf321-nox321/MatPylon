@@ -9,6 +9,7 @@ export function AboutPage() {
   const [autoLaunch, setAutoLaunch] = useState<boolean | null>(null);
   const [paths, setPaths] = useState<{ dataDir: string; configFile: string; logFile: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [diagMsg, setDiagMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void window.matpylon.getAutoLaunch().then(setAutoLaunch);
@@ -75,6 +76,28 @@ export function AboutPage() {
             가져오기
           </Button>
           {msg && <span className="text-sm text-slate-600">{msg}</span>}
+        </div>
+      </Card>
+
+      <Card title="진단 묶음">
+        <p className="mb-3 text-sm text-slate-600">
+          전송이 안 되거나 실패가 쌓이면, 로그·설정·이력·요약을 zip 하나로 묶어 내보내세요. 그 파일만 들고 나오면 됩니다 —
+          토큰은 들어가지 않습니다.
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={async () => {
+              try {
+                const saved = await window.matpylon.exportDiagnostics();
+                if (saved) setDiagMsg(`저장했습니다: ${saved}`);
+              } catch (e) {
+                setDiagMsg((e as Error).message.replace(/^.*Error: /, ""));
+              }
+            }}
+          >
+            진단 묶음 내보내기
+          </Button>
+          {diagMsg && <span className="break-all text-sm text-slate-600">{diagMsg}</span>}
         </div>
       </Card>
     </div>

@@ -368,8 +368,13 @@ export class Engine extends EventEmitter {
     this.emitStatus();
   }
 
-  files(status?: FileRow["status"]) {
-    return this.ledger.list(status);
+  dismiss(id: number): void {
+    this.ledger.dismiss(id);
+    this.emitStatus();
+  }
+
+  files(status?: FileRow["status"], limit?: number) {
+    return this.ledger.list(status, limit);
   }
 
   status(): EngineStatus {

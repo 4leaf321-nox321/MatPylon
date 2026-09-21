@@ -8,6 +8,7 @@ import { configPath, parseConfig } from "@engine/config";
 import { previewPaths } from "@engine/scanner";
 import { CHANNELS, type PreviewSource } from "@shared/ipc";
 import { fileSecrets } from "./secrets";
+import { diagnosticsFilename, diagnosticsZip } from "./diagnostics";
 
 // 개발용: `--data-dir=경로` 로 설정·원장·잠금을 다른 곳에 둔다. 설치된 앱이 떠 있는
 // 채로 개발 빌드를 띄워 보려면 이것이 필요하다 — 잠금이 userData 에 걸린다.
@@ -254,6 +255,7 @@ if (singleInstance) app.whenReady().then(() => {
     engine.files(status as Parameters<Engine["files"]>[0]),
   );
   ipcMain.handle(CHANNELS.requeue, (_e, id: number) => engine.requeue(id));
+  ipcMain.handle(CHANNELS.dismiss, (_e, id: number) => engine.dismiss(id));
   ipcMain.handle(CHANNELS.pickFolder, async () => {
     const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
@@ -302,6 +304,40 @@ if (singleInstance) app.whenReady().then(() => {
     const mine = engine.getConfig();
     engine.setConfig({ ...incoming, server: { ...incoming.server, connectorId: mine.server.connectorId, connectorName: mine.server.connectorName } });
     return true;
+  });
+  // 폐쇄망 장비 PC 에서 들고 나올 파일 하나. 로그·설정·이력·요약을 묶는다(토큰 제외).
+  ipcMain.handle(CHANNELS.exportDiagnostics, async () => {
+    const now = new Date();
+    const r = await dialog.showSaveDialog({
+      defaultPath: diagnosticsFilename(os.hostname(), now),
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    // 오늘 것과 넘어간 것(rotate)까지. 없으면 조용히 건너뛴다.
+    const logs: { name: string; text: string }[] = [];
+    for (const f of [logFile(), logFile().replace(/main\.log$/, "main.old.log")]) {
+      try {
+        logs.push({ name: path.basename(f), text: readFileSync(f, "utf8") });
+      } catch {
+        /* 없으면 안 넣는다 */
+      }
+    }
+    writeFileSync(
+      r.filePath,
+      diagnosticsZip({
+        status: engine.status(),
+        config: engine.getConfig(),
+        rows: engine.files(undefined, 5000),
+        hasToken: engine.secrets.getToken() !== null,
+        dataDir: app.getPath("userData"),
+        hostname: os.hostname(),
+        platform: `${os.type()} ${os.release()}`,
+        versions: process.versions,
+        logs,
+        now,
+      }),
+    );
+    return r.filePath;
   });
   ipcMain.handle(CHANNELS.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin);
   ipcMain.handle(CHANNELS.setAutoLaunch, (_e, enabled: boolean) => {

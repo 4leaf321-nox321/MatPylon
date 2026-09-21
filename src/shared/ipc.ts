@@ -96,6 +96,8 @@ export interface MatPylonApi {
   reference(): Promise<ReferenceMaterial[] | null>;
   listFiles(status?: string): Promise<LedgerRow[]>;
   requeue(id: number): Promise<void>;
+  /** 못 보내는 것으로 보고 닫는다. 실패 수에서 빠진다 — 「다시 시도」로 되살릴 수 있다. */
+  dismiss(id: number): Promise<void>;
   /** 폴더 선택 대화상자. 취소하면 null. */
   pickFolder(): Promise<string | null>;
   /** 파일 선택(CA 인증서). 취소하면 null. */
@@ -108,6 +110,9 @@ export interface MatPylonApi {
   openDataFolder(): Promise<void>;
   /** 설정을 파일로 — 장비 PC 여러 대에 복제한다. 토큰은 안 들어간다. */
   exportConfig(): Promise<boolean>;
+  /** 로그·설정·이력·요약을 zip 하나로. 폐쇄망에서 이 파일만 들고 나온다.
+   *  토큰은 안 들어간다. 저장했으면 파일 경로, 취소하면 null. */
+  exportDiagnostics(): Promise<string | null>;
   importConfig(): Promise<boolean>;
   paths(): Promise<{ dataDir: string; configFile: string; logFile: string }>;
   /** 로그인 시 자동 시작. 레지스트리 Run 키 — 관리자 권한 불필요. */
@@ -134,6 +139,7 @@ export const CHANNELS = {
   reference: "engine:reference",
   listFiles: "engine:listFiles",
   requeue: "engine:requeue",
+  dismiss: "engine:dismiss",
   pickFolder: "app:pickFolder",
   pickFile: "app:pickFile",
   previewPaths: "app:previewPaths",
@@ -141,6 +147,7 @@ export const CHANNELS = {
   openLogFolder: "app:openLogFolder",
   openDataFolder: "app:openDataFolder",
   exportConfig: "app:exportConfig",
+  exportDiagnostics: "app:exportDiagnostics",
   importConfig: "app:importConfig",
   paths: "app:paths",
   getAutoLaunch: "app:getAutoLaunch",

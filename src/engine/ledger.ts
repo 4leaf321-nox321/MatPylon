@@ -18,7 +18,10 @@ export type FileStatus =
   | "failed"
   | "retry"
   | "duplicate"
-  | "gone";
+  | "gone"
+  /** 사람이 「무시」를 눌렀다 — 못 보내는 것으로 판단하고 닫았다. 실패 수에서 빠지고
+   * 보존 기간이 지나면 정리된다. 「다시 시도」로 되살릴 수 있다. */
+  | "dismissed";
 
 export interface FileRow {
   id: number;
@@ -187,8 +190,16 @@ export class Ledger {
   requeue(id: number): void {
     this.db
       .prepare(
-        "UPDATE files SET status = 'ready', attempts = 0, next_attempt_at = NULL WHERE id = ? AND status IN ('failed','retry')",
+        "UPDATE files SET status = 'ready', attempts = 0, next_attempt_at = NULL WHERE id = ? AND status IN ('failed','retry','dismissed')",
       )
+      .run(id);
+  }
+
+  /** 사람이 「무시」를 눌렀다. **닫는 길이 없으면 실패 수가 영영 빨갛게 남고 새 실패가
+   * 그 안에 묻힌다.** 오류 문구는 남긴다 — 왜 무시했는지가 기록이다. */
+  dismiss(id: number): void {
+    this.db
+      .prepare("UPDATE files SET status = 'dismissed' WHERE id = ? AND status IN ('failed','retry')")
       .run(id);
   }
 
@@ -230,12 +241,13 @@ export class Ledger {
     return { pending: r.pending ?? 0, failed: r.failed ?? 0, lastSentAt: r.last_sent };
   }
 
-  /** 끝난 행(sent·duplicate·gone)을 보존 기간 뒤 지운다. `failed` 는 사람이 봐야 하니 남긴다.
+  /** 끝난 행(sent·duplicate·gone·dismissed)을 보존 기간 뒤 지운다. `failed` 는 **아직 사람이
+   * 안 본 것**이라 남긴다 — 봤다면 「무시」로 닫혔을 것이다.
    * 지우면 같은 해시가 다시 오면 다시 보내지만, 서버가 409 로 막는다. */
   prune(olderThanMs: number): number {
     return this.db
       .prepare(
-        `DELETE FROM files WHERE status IN ('sent','duplicate','gone')
+        `DELETE FROM files WHERE status IN ('sent','duplicate','gone','dismissed')
          AND COALESCE(sent_at, observed_at) < ?`,
       )
       .run(olderThanMs).changes;

@@ -20,6 +20,7 @@
     "src/engine",
     "src/shared",
     "tests/architecture",
+    "tests/electron",
     "tests/engine",
     "vite.config.ts",
     "vitest.config.ts"

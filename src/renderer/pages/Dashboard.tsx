@@ -160,6 +160,7 @@ export function StatusBadge({ status }: { status: string }) {
     retry: ["warn", "재시도 대기"],
     duplicate: ["muted", "중복"],
     gone: ["muted", "사라짐"],
+    dismissed: ["muted", "무시함"],
   };
   const [tone, label] = map[status] ?? ["muted", status];
   return <Badge tone={tone}>{label}</Badge>;
